@@ -1,3 +1,4 @@
+export * from "./public-schema-native-custody.js";
 // Explicit schema exports keep public protocol changes reviewable.
 export * from "./schema/sessions-goal.js";
 export * from "./schema/session-processes.js";

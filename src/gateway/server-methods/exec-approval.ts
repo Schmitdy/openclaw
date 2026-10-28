@@ -3,6 +3,7 @@ import {
   ErrorCodes,
   errorShape,
   validateExecApprovalGetParams,
+  validateExecApprovalGrantsInspectParams,
   validateExecApprovalGrantsListParams,
   validateExecApprovalGrantsRevokeParams,
   validateExecApprovalRequestParams,
@@ -38,7 +39,11 @@ import {
   buildCronExecOperationBinding,
   parseCronExecOperationBinding,
 } from "../operator-approval-standing-grants.js";
-import { listCronStandingGrants, revokeCronStandingGrant } from "../operator-approval-store.js";
+import {
+  inspectCronStandingGrant,
+  listCronStandingGrants,
+  revokeCronStandingGrant,
+} from "../operator-approval-store.js";
 import { resolveGrantExpiryDaysConfig } from "../standing-grant-expiry-config.js";
 import {
   captureApprovalWorkerOwner,
@@ -424,6 +429,67 @@ export function createExecApprovalHandlers(
           const runId = normalizeOptionalString(snapshot.request.runId);
           return runId && context.chatRunState.hasAbortMarker(runId) ? "run-aborted" : undefined;
         },
+      });
+    },
+    "exec.approval.grants.inspect": async (options) => {
+      using authority = createApprovalRequestAuthority(options);
+      const { params, respond } = options;
+      if (
+        !assertValidParams(
+          params,
+          validateExecApprovalGrantsInspectParams,
+          "exec.approval.grants.inspect",
+          respond,
+        )
+      ) {
+        return;
+      }
+      authority.assertCurrent();
+      const source = lookupCronRunExecSource(params.runId);
+      const handle = source?.standingGrantAuthority?.handle;
+      if (!source || !handle) {
+        respond(true, {
+          observedAtMs: Date.now(),
+          source: {
+            registered: source !== undefined,
+            standingGrantAuthority: handle !== undefined,
+          },
+          grant: { evaluated: false },
+        });
+        return;
+      }
+      authority.bindSource({ agentId: source.agentId });
+      const result = await inspectCronStandingGrant({
+        grantId: params.grantId,
+        source: {
+          agentId: source.agentId,
+          cronJobId: source.jobId,
+          jobConfigRevision: source.jobConfigRevision,
+          handle: { ...handle },
+        },
+        ...(params.expected ? { expected: params.expected } : {}),
+        guard: authority.guard,
+      });
+      authority.assertCurrent();
+      if (lookupCronRunExecSource(params.runId) !== source) {
+        respond(true, {
+          observedAtMs: Date.now(),
+          source: { registered: false, standingGrantAuthority: false },
+          grant: { evaluated: false },
+        });
+        return;
+      }
+      respond(true, {
+        observedAtMs: Date.now(),
+        source: {
+          registered: true,
+          standingGrantAuthority: true,
+          agentId: source.agentId,
+          cronJobId: source.jobId,
+          jobConfigRevision: source.jobConfigRevision,
+          receipt: { receiptId: handle.receiptId, startedAtMs: handle.startedAtMs },
+        },
+        ...result,
       });
     },
     "exec.approval.grants.list": async (options) => {

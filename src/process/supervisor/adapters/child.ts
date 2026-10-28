@@ -26,6 +26,10 @@ import {
   resolveTrustedWindowsCmdExe,
   resolveWindowsCommandShim,
 } from "../../windows-command.js";
+import {
+  createCommandStartObserver,
+  digestCommandInvocation,
+} from "../service-child-command-start.js";
 import { createOutputRelay } from "../service-child-output-relay.js";
 import { createServiceChildRelayAdapter } from "../service-child-relay-host.js";
 import type {
@@ -145,6 +149,7 @@ export async function createChildAdapter(
       oomScoreWrapperSelected: false,
       abortSignal: params.abortSignal,
       onSpawnCleanup: params.onSpawnCleanup,
+      onCommandStart: params.onCommandStart,
       stderrDestination: params.stderrDestination,
     });
   }
@@ -190,6 +195,7 @@ export async function createChildAdapter(
       oomScoreWrapperSelected: preparedSpawn.wrapped,
       abortSignal: params.abortSignal,
       onSpawnCleanup: params.onSpawnCleanup,
+      onCommandStart: params.onCommandStart,
       stderrDestination: params.stderrDestination,
       stdoutConsumption: params.stdoutConsumption,
       terminateOnHostLoss: params.terminateOnHostLoss,
@@ -280,6 +286,8 @@ export async function createChildAdapter(
       options,
     });
 
+  const observe = createCommandStartObserver(params.onCommandStart);
+  const sentInvocationDigest = digestCommandInvocation(preparedSpawn.command, preparedSpawn.args);
   let spawned: Awaited<ReturnType<typeof spawnChild>>;
   try {
     spawned = await spawnChild();
@@ -288,6 +296,11 @@ export async function createChildAdapter(
     }
   } catch (error) {
     if (!(error instanceof WindowsJobSetupError)) {
+      observe({
+        outcome: "start-unknown",
+        spawnPath: windowsJob ? "windows-job-direct" : "direct",
+        hostObservedAtMs: Date.now(),
+      });
       throw error;
     }
     // No command has been admitted. Retire the launcher before the ordinary spawn.
@@ -296,10 +309,26 @@ export async function createChildAdapter(
     windowsJob = undefined;
     windowsCleanup = undefined;
     tryWindowsJob = false;
-    spawned = await spawnChild();
+    try {
+      spawned = await spawnChild();
+    } catch (spawnError) {
+      observe({ outcome: "start-unknown", spawnPath: "direct", hostObservedAtMs: Date.now() });
+      throw spawnError;
+    }
   }
 
   const child = spawned as ChildProcessWithoutNullStreams;
+  if (!windowsJob && child.pid !== undefined) {
+    observe({
+      outcome: "started",
+      commandPid: child.pid,
+      spawnPath: "direct",
+      observedBy: "node-spawn-event",
+      hostObservedAtMs: Date.now(),
+      sentInvocationDigest,
+      ...(!options.shell ? { spawnedInvocationDigest: sentInvocationDigest } : {}),
+    });
+  }
   const events = createProcessAdapterEvents();
   if (params.onWorkerMessage) {
     child.on("message", (message) => {
@@ -675,6 +704,16 @@ export async function createChildAdapter(
     try {
       if (windowsJob) {
         await windowsJob.ready;
+        if (windowsJob.commandPid !== undefined) {
+          observe({
+            outcome: "started",
+            commandPid: windowsJob.commandPid,
+            spawnPath: "windows-job-direct",
+            observedBy: "windows-job-spawned-control",
+            hostObservedAtMs: Date.now(),
+            sentInvocationDigest,
+          });
+        }
       }
       // Construction may outlive admission; publish cleanup before any private input.
       assertCurrent();
@@ -697,6 +736,11 @@ export async function createChildAdapter(
         await secretDelivery?.deliverTo(child, { abortSignal: params.abortSignal });
       }
     } catch (error) {
+      observe({
+        outcome: "start-unknown",
+        spawnPath: windowsJob ? "windows-job-direct" : "direct",
+        hostObservedAtMs: Date.now(),
+      });
       kill("SIGKILL");
       try {
         const [outcome] = await cleanupOutcome;

@@ -998,3 +998,19 @@ metaschema admission, and `duplicateIds: "reject"` when a new schema cannot reus
 registered root ID. The defaults preserve MCP's existing schema-admission behavior.
 Keep one provider per reference namespace; use a new provider when schemas must not
 retain references to previously registered IDs.
+
+## Owned process start observations
+
+The `process-runtime` SDK entrypoint exports `OwnedStdioCommandStart`.
+`createOwnedStdioProcess` accepts an optional `onCommandStart` observer, called at
+most once from the process owner independently of private-input readiness. Its
+outcome is `started`, `spawn-error-before-confirmation`, or `start-unknown`.
+Observer errors are ignored and do not grant launch, cleanup, or write authority.
+
+A started observation includes the command PID, the actual spawn path, a digest
+of the sent invocation, and a spawned-invocation digest when the owner observed
+it. Raw arguments are not part of the observation. `hostObservedAtMs` is the
+host's observation time; `anchorObservedAtMs`, when present, comes from the
+anchor. Neither field claims an OS process creation time. Construction failure
+without a resolved path reports `start-unknown` with `spawnPath: "unresolved"`;
+an earlier observed start is never overwritten by a later readiness failure.

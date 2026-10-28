@@ -15,6 +15,7 @@ import {
   parseExecutionIdentityAdmissionToken,
   type ExecutionIdentityAdmissionToken,
 } from "./execution-identity-admission.js";
+import { isNativeCustodyOwner } from "./native-custody-brand.js";
 
 const EXECUTION_DECISION_WORK_MAX_BYTES = 16 * 1024;
 const EXECUTION_DECISION_RAW_REF_MAX_LENGTH = 4_096;
@@ -86,7 +87,7 @@ function buildReceipt(params: {
 }
 
 /** Revalidate closed work before queue cloning, key access, or database access. */
-export function parseExecutionDecisionWork(value: unknown): ExecutionDecisionWork {
+export function parseExecutionDecisionWorkPayload(value: unknown): ExecutionDecisionWork {
   if (
     !isClosedPayloadRecord(value) ||
     !hasOnlyKeys(value, ["workVersion", "token", "receipt", "refs"]) ||
@@ -144,7 +145,7 @@ export function parseExecutionDecisionWork(value: unknown): ExecutionDecisionWor
         ? {
             resource: parseRawRef({
               value: value.refs.resource,
-              namespaces: ["credential-profile"] as const,
+              namespaces: ["credential-profile", "cli-invocation", "cron-standing-grant"] as const,
             }),
           }
         : {}),
@@ -152,7 +153,12 @@ export function parseExecutionDecisionWork(value: unknown): ExecutionDecisionWor
         ? {
             target: parseRawRef({
               value: value.refs.target,
-              namespaces: ["model-route", "session"] as const,
+              namespaces: [
+                "model-route",
+                "session",
+                "provider-conversation",
+                "cron-operation-binding",
+              ] as const,
             }),
           }
         : {}),
@@ -181,12 +187,32 @@ export function parseExecutionDecisionWork(value: unknown): ExecutionDecisionWor
   };
 }
 
+/** Generic producers cannot claim the reserved native custody writer's origin. */
+export function parseExecutionDecisionWork(value: unknown): ExecutionDecisionWork {
+  const work = parseExecutionDecisionWorkPayload(value);
+  if (isNativeCustodyOwner(work.receipt.source.owner)) {
+    throw new Error("native custody owners require the reserved writer");
+  }
+  return work;
+}
+
 /** Project raw private refs at the audit owner, then persist only the bounded receipt. */
 export function processExecutionDecisionWorkInDatabase(
   value: unknown,
   options: OpenClawStateDatabaseOptions & { database: OpenClawStateDatabase },
 ): "inserted" | "existing" {
   const work = parseExecutionDecisionWork(value);
+  return recordExecutionDecisionFactInDatabase(
+    projectExecutionDecisionWorkInDatabase(work, options),
+    options,
+  );
+}
+
+/** Shared privacy projection; callers own parsing and the subsequent persistence boundary. */
+export function projectExecutionDecisionWorkInDatabase(
+  work: ExecutionDecisionWork,
+  options: OpenClawStateDatabaseOptions & { database: OpenClawStateDatabase },
+): DecisionReceiptV1 {
   const db = openOpenClawStateDatabase(options).db;
   const resourceRef = work.refs?.resource
     ? pseudonymizeExecutionIdentityRef({
@@ -239,7 +265,7 @@ export function processExecutionDecisionWorkInDatabase(
   if (!validateDecisionReceiptV1(receipt)) {
     throw new Error("execution decision work projection violates DecisionReceiptV1");
   }
-  return recordExecutionDecisionFactInDatabase(receipt, options);
+  return receipt;
 }
 
 /** Install the current process writer sink; callers never create a second writer. */

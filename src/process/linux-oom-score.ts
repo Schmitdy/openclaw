@@ -136,7 +136,15 @@ export function spawnWithInheritedOomScore(
   command: string,
   args: string[],
   options: SpawnOptions,
+  observeInvocation?: (command: string, args: readonly string[]) => void,
 ): ChildProcess {
+  const observe = (nativeCommand: string, nativeArgs: readonly string[]) => {
+    try {
+      observeInvocation?.(nativeCommand, nativeArgs);
+    } catch {
+      /* Diagnostics cannot affect spawn. */
+    }
+  };
   if (
     process.platform !== "linux" ||
     !isWrapped(command, args) ||
@@ -144,6 +152,7 @@ export function spawnWithInheritedOomScore(
     options.shell ||
     options.argv0 !== undefined
   ) {
+    observe(command, args);
     return spawnOomScoreAdjusted(command, args, options);
   }
   let scoreFd: number | undefined;
@@ -156,10 +165,12 @@ export function spawnWithInheritedOomScore(
     if (scoreFd !== undefined) {
       fs.closeSync(scoreFd);
     }
+    observe(command, args);
     return spawn(command, args, options);
   }
   try {
     // No await: only this fork inherits the raised score, including its earliest descendants.
+    observe(args[2], args.slice(3));
     return spawn(args[2], args.slice(3), options);
   } finally {
     try {

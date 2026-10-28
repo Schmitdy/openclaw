@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { buildCronExecOperationBinding } from "../gateway/operator-approval-standing-grants.js";
 import type {
   ConsumeCronStandingGrantResult,
@@ -92,6 +93,9 @@ export async function prepareCronStandingGrantConsumption(
     }
   };
   return {
+    grantId: expectedGrant.grantId,
+    receiptId: authority.handle.receiptId,
+    operationBindingDigest: createHash("sha256").update(lookup.operationBinding).digest("hex"),
     assertCurrent,
     releaseSpawn,
     initiateSpawn<T>(this: void, launch: () => T, settlement?: Promise<unknown>): T {

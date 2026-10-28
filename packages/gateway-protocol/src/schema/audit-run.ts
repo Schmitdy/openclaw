@@ -350,3 +350,37 @@ export type AuditRunInspectParams =
       executionLimit?: never;
     });
 export type AuditRunInspectResult = Static<typeof AuditRunInspectResultSchema>;
+
+/** Reserved native diagnostics; retained reads remain available with collection disabled. */
+export const AuditRunCustodyParamsSchema = closedObject({
+  contextId: ExecutionIdentityRefSchema,
+  executionId: ExecutionIdentityRefSchema,
+  limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 100 })),
+  cursor: Type.Optional(
+    Type.String({ minLength: 3, maxLength: 64, pattern: "^(0|[1-9][0-9]*):([1-9][0-9]*)$" }),
+  ),
+});
+export const AuditRunCustodyResultSchema = closedObject({
+  entries: Type.Array(
+    closedObject({
+      receiptId: ExecutionIdentityRefSchema,
+      family: ExecutionIdentityRefSchema,
+      operation: ExecutionIdentityRefSchema,
+      outcome: DecisionReceiptV1Schema.properties.decision.properties.outcome,
+      reasonCode: ExecutionIdentityRefSchema,
+      occurredAt: Type.Integer({ minimum: 0 }),
+      actionId: Type.Optional(ExecutionIdentityRefSchema),
+      recordRef: ExecutionIdentityRefSchema,
+      resourceRef: Type.Optional(ExecutionIdentityRefSchema),
+      targetRef: Type.Optional(ExecutionIdentityRefSchema),
+      policyRefs: ExecutionIdentityRefArraySchema,
+      summary: Type.Optional(Type.String({ maxLength: 512 })),
+      missingEvidence: ExecutionIdentityRefArraySchema,
+      producer: stringLiteralUnion(["cli-process", "cron-standing-grant"]),
+    }),
+    { maxItems: 100 },
+  ),
+  nextCursor: Type.Optional(Type.String({ maxLength: 64 })),
+});
+export type AuditRunCustodyParams = Static<typeof AuditRunCustodyParamsSchema>;
+export type AuditRunCustodyResult = Static<typeof AuditRunCustodyResultSchema>;

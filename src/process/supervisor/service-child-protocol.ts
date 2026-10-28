@@ -45,6 +45,13 @@ export type ServiceChildControlMessage = ServiceChildControlPayload & {
 };
 
 export type ServiceChildAnchorPayload =
+  | {
+      type: "command-spawned";
+      commandPid: number;
+      anchorPid: number;
+      spawnedInvocationDigest: string;
+      anchorObservedAtMs: number;
+    }
   | { type: "prepared" }
   | { type: "stdin-closed" }
   | { type: "worker-message"; message: unknown }
@@ -81,6 +88,8 @@ export type ServiceChildAnchorPayload =
       type: "startup-error";
       error: string;
       errorDetails?: BrokerError;
+      commandSpawned?: true;
+      commandPid?: number;
       anchorPid?: number;
     };
 
@@ -122,4 +131,13 @@ export function encodeServiceChildMessage(
 
 export function supportsNodeWorkerProcessOwner(platform = process.platform): boolean {
   return platform === "linux" || platform === "darwin";
+}
+
+/** The retained private control pipe carries only sequenced anchor frames. */
+export function readServiceChildAnchorLine(line: string): ServiceChildAnchorMessage {
+  const message = readServiceChildMessage(JSON.parse(line));
+  if (!("sequence" in message)) {
+    throw new Error("invalid anchor message");
+  }
+  return message;
 }

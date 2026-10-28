@@ -13,6 +13,7 @@ import { configureExecutionDecisionWorkSink } from "../audit/execution-decision-
 import { configureExecutionIdentityAdmissionSink } from "../audit/execution-identity-admission.js";
 import { configureMessageActionDecisionSink } from "../audit/message-action-decision.js";
 import { onTrustedMessageAuditEvent } from "../audit/message-audit-events.js";
+import { configureNativeCustodyFactSink } from "../audit/native-custody-facts.js";
 import { configureRuntimeActionDecisionSink } from "../audit/runtime-action-decision.js";
 import { createChannelAdmissionAudit } from "../channels/message-access/admission-evidence.js";
 import { getRuntimeConfig } from "../config/io.js";
@@ -90,6 +91,7 @@ export function startGatewayEventSubscriptions(params: GatewayEventSubscriptionP
     scheduler: params.scheduler,
   });
   const clearAuditSinks = [
+    configureNativeCustodyFactSink(auditRecorder.recordNativeCustodyFact),
     configureExecutionIdentityAdmissionSink(auditRecorder.recordExecutionIdentity),
     configureExecutionDecisionWorkSink(auditRecorder.recordExecutionDecisionWork),
     configureMessageActionDecisionSink(auditRecorder.recordExecutionDecision),

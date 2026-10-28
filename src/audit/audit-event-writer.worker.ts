@@ -31,6 +31,7 @@ import {
   pruneExpiredOutboundMessageProgressInDatabase,
   recordOutboundMessageProgressInDatabase,
 } from "./message-delivery-progress-store.js";
+import { processNativeCustodyFactInDatabase } from "./native-custody-facts.js";
 
 // Opening can also encounter contention, so it shares the write retry boundary.
 function executeAuditAttempt(
@@ -86,7 +87,9 @@ export const auditOperations = {
         for (const request of requests) {
           const result = executeAuditAttempt(
             () => {
-              if (request.type === "record-event") {
+              if (request.type === "record-native-custody-fact") {
+                processNativeCustodyFactInDatabase(request.work, database);
+              } else if (request.type === "record-event") {
                 if (isOutboundMessageProgressInput(request.input)) {
                   recordOutboundMessageProgressInDatabase(request.input, database);
                 } else {

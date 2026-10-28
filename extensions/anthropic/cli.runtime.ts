@@ -12,76 +12,32 @@ import { createDeferred } from "openclaw/plugin-sdk/extension-shared";
 import { isRecord } from "openclaw/plugin-sdk/string-coerce-runtime";
 import { hasClaudeRawToolInvocation } from "./cli-output.js";
 import type { ClaudeCliSecretInput } from "./cli-process.js";
-import { prepareClaudeCliTransportArgs } from "./cli-runtime-args.js";
+import { describeClaudeTransportArgs, prepareClaudeCliTransportArgs } from "./cli-runtime-args.js";
+import {
+  createUserInput,
+  rejectInjectedInputs,
+  privateInputHolds,
+  carriesTurnContext,
+  resolvePromptContext,
+} from "./cli-runtime-input.js";
+import { observeLifecycle, observeTurnUse } from "./cli-runtime-lifecycle.js";
 import {
   readReplayedTaskId,
   recordRunningDescendants,
   recordTaskOwnership,
 } from "./cli-runtime-tasks.js";
+import type {
+  ClaudeCliExecuteContext,
+  ClaudeCliSession,
+  ClaudeCliTurn,
+  CliProcessLifecycleObserver,
+} from "./cli-runtime-types.js";
 import { createClaudeCliTransport } from "./cli-transport.js";
 import { createClaudeCliUserInputAuthorizer } from "./cli-user-input.js";
+export type { ClaudeCliExecuteContext } from "./cli-runtime-types.js";
 
 const IDLE_TIMEOUT_MS = 10 * 60 * 1_000;
 
-/**
- * Host-internal, like the forwarded auth credential and not part of the plugin SDK: a host
- * whose history owner can change while the run lasts (a native login) passes a check for
- * where saved turn context leaves after startup, the prompt send and the prompt hook answer.
- */
-export type ClaudeCliExecuteContext = CliBackendExecuteContext & {
-  assertPrivateInputCurrent?: () => void;
-};
-type ClaudeCliTurn = {
-  context: ClaudeCliExecuteContext;
-  controller: AbortController;
-  userInput: ReturnType<typeof createClaudeCliUserInputAuthorizer>;
-  events: PassThrough;
-  inputUuid: string;
-  /** Replayed user text is never a task receipt, even after its input lifecycle ends. */
-  submittedInputUuids: Set<string>;
-  inputStarted: boolean;
-  promptSubmitted: boolean;
-  /** Hook reruns carry no input UUID and may rewrite text; retain their native input owner. */
-  promptInputUuid: string;
-  sawTerminalResult: boolean;
-  interrupted: boolean;
-  foregroundTaskIds: Set<string>;
-  foregroundBashToolUseIds: Set<string>;
-  pendingBackgroundTaskIds: Set<string>;
-  taskNotifications: Map<string, "queued" | "replayed">;
-  /** Same-turn inputs written to native, keyed by UUID until their lifecycle completes. */
-  injectedInputs: Map<
-    string,
-    {
-      text: string;
-      promptContext?: CliBackendExecuteContext["promptContext"];
-      started: ReturnType<typeof createDeferred<void>>;
-    }
-  >;
-  /**
-   * A successful result withheld until every injected input has completed. It is
-   * released as terminal on completion, or as interim when native opens another
-   * turn for the input first.
-   */
-  heldResult?: Record<string, unknown>;
-  error?: Error;
-};
-type ClaudeCliSession = {
-  handle: CliBackendLiveSessionHandle;
-  capability?: CliBackendLiveSessionCapability;
-  transport?: Awaited<ReturnType<typeof createClaudeCliTransport>>;
-  transportStartup?: ReturnType<typeof createClaudeCliTransport>;
-  currentTurn?: ClaudeCliTurn;
-  idleTimer?: ReturnType<typeof setTimeout>;
-  hasInputLifecycle: boolean;
-  closed: boolean;
-  // Tasks outlive inputs; false marks subagent work with no parent-stream query.
-  taskOwners: Map<string, string | false>;
-  // Native notification results identify task runs rather than task IDs.
-  taskRuns: Map<string, string>;
-  // Running Agent/Workflow tasks and subagent-owned work, with their launching task.
-  runningDescendants: Map<string, string | undefined>;
-};
 const sessions = new WeakMap<CliBackendLiveSessionHandle, ClaudeCliSession>();
 
 function activeTurn(session: ClaudeCliSession): ClaudeCliTurn | undefined {
@@ -104,24 +60,6 @@ function activeTurn(session: ClaudeCliSession): ClaudeCliTurn | undefined {
   } catch {
     return undefined;
   }
-}
-
-function privateInputHolds(turn: ClaudeCliTurn): boolean {
-  try {
-    turn.context.assertPrivateInputCurrent?.();
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-function carriesTurnContext(request: Record<string, unknown>, response: unknown): boolean {
-  return (
-    request.callback_id === "UserPromptSubmit" &&
-    isRecord(response) &&
-    isRecord(response.hookSpecificOutput) &&
-    response.hookSpecificOutput.additionalContext !== undefined
-  );
 }
 
 async function authorizeTool(
@@ -168,20 +106,6 @@ async function authorizeTool(
   } catch {
     return { behavior: "deny", message: "OpenClaw could not authorize this tool call." };
   }
-}
-
-function resolvePromptContext(turn: ClaudeCliTurn, prompt: unknown) {
-  if (turn.promptInputUuid !== turn.inputUuid) {
-    return turn.injectedInputs.get(turn.promptInputUuid)?.promptContext;
-  }
-  // Some native versions submit hooks before the started receipt. Match only the
-  // first pass; subsequent passes belong to that UUID even when text is rewritten.
-  const injected = [...turn.injectedInputs].find(([, input]) => input.text === prompt);
-  if (!injected) {
-    return turn.context.promptContext;
-  }
-  turn.promptInputUuid = injected[0];
-  return injected[1].promptContext;
 }
 
 async function handleRequest(
@@ -244,29 +168,6 @@ async function handleRequest(
   throw new Error("Unknown Claude CLI hook callback.");
 }
 
-function createUserInput(
-  context: CliBackendExecuteContext,
-  text: string,
-  uuid: string,
-  hostGenerated = false,
-) {
-  return {
-    type: "user",
-    message: { role: "user", content: text },
-    parent_tool_use_id: null,
-    uuid,
-    // Claude saves synthetic input as a meta row: the model reads it, history never shows it.
-    ...(hostGenerated ? { isSynthetic: true } : {}),
-    ...(context.sessionId ? { session_id: context.sessionId } : {}),
-  };
-}
-
-function rejectInjectedInputs(turn: ClaudeCliTurn, error: Error) {
-  for (const input of turn.injectedInputs.values()) {
-    input.started.reject(error);
-  }
-}
-
 function canInjectInput(session: ClaudeCliSession, turn: ClaudeCliTurn): boolean {
   return session.hasInputLifecycle && turn.promptSubmitted && activeTurn(session) === turn;
 }
@@ -308,25 +209,54 @@ async function injectInput(
   await started.promise;
 }
 
-function closeSession(session: ClaudeCliSession, error?: unknown) {
+function closeSession(
+  session: ClaudeCliSession,
+  reason: "idle" | "abort" | "restart" | "error" | "mcp-capture-rotation",
+  error?: unknown,
+) {
   if (session.closed) {
     return;
   }
   session.closed = true;
+  observeLifecycle(() =>
+    session.launchLifecycle?.retireRequested({
+      generation: session.handle.generation,
+      reason,
+      mode: session.capability ? "warm" : "one-shot",
+    }),
+  );
   clearTimeout(session.idleTimer);
   session.capability?.remove(session.handle);
   const turn = session.currentTurn;
   session.currentTurn = undefined;
   if (turn) {
+    observeTurnUse(session, turn);
     turn.error = toErrorObject(error, "Claude CLI live session closed.");
     rejectInjectedInputs(turn, turn.error);
     turn.controller.abort();
     turn.events.end();
   }
   session.transport?.close();
+  void session.handle.waitForExit().then(
+    () =>
+      observeLifecycle(() =>
+        session.launchLifecycle?.exitSettled({
+          generation: session.handle.generation,
+          outcome: session.startObserved ? "exit-confirmed" : "retired-without-observed-start",
+        }),
+      ),
+    () =>
+      observeLifecycle(() =>
+        session.launchLifecycle?.exitSettled({
+          generation: session.handle.generation,
+          outcome: session.startObserved ? "exit-unconfirmed" : "retired-without-observed-start",
+        }),
+      ),
+  );
 }
 
 function completeTurn(session: ClaudeCliSession, turn: ClaudeCliTurn) {
+  observeTurnUse(session, turn);
   // Nested Agent and Workflow descendants can outlive their foreground parent without a
   // parent-lane receipt. A warm process would lend them the next turn's tool and MCP authority.
   const holdsBackgroundTasks =
@@ -363,6 +293,15 @@ async function emitHeldInterimResult(turn: ClaudeCliTurn) {
 
 async function acceptMessage(session: ClaudeCliSession, message: Record<string, unknown>) {
   if (message.type === "system" && message.subtype === "init") {
+    if (typeof message.session_id === "string" && message.session_id.length > 0) {
+      session.initConversations.add(message.session_id);
+      observeLifecycle(() =>
+        session.launchLifecycle?.processInitialized({
+          generation: session.handle.generation,
+          conversation: String(message.session_id),
+        }),
+      );
+    }
     session.hasInputLifecycle =
       Array.isArray(message.capabilities) && message.capabilities.includes("msg_lifecycle_v1");
   }
@@ -448,6 +387,9 @@ async function acceptMessage(session: ClaudeCliSession, message: Record<string, 
         turn.pendingBackgroundTaskIds.size === 0
       ) {
         turn.heldResult = undefined;
+        if (typeof heldResult.session_id === "string" && heldResult.session_id.length > 0) {
+          turn.conversations.add(heldResult.session_id);
+        }
         if (!turn.events.write(heldResult)) {
           await once(turn.events, "drain", { signal: turn.controller.signal });
         }
@@ -553,6 +495,14 @@ async function acceptMessage(session: ClaudeCliSession, message: Record<string, 
       holdsForInput = completesTurn && !failed && turn.injectedInputs.size > 0;
     }
   }
+  if (
+    completesTurn &&
+    !holdsForInput &&
+    typeof message.session_id === "string" &&
+    message.session_id.length > 0
+  ) {
+    turn.conversations.add(message.session_id);
+  }
   if (holdsForInput) {
     turn.heldResult = message;
     return;
@@ -571,9 +521,15 @@ async function acceptMessage(session: ClaudeCliSession, message: Record<string, 
   }
 }
 
-function createSession(capability?: CliBackendLiveSessionCapability): ClaudeCliSession {
+function createSession(
+  capability?: CliBackendLiveSessionCapability,
+  lifecycle?: CliProcessLifecycleObserver,
+): ClaudeCliSession {
   const session: ClaudeCliSession = {
     capability,
+    launchLifecycle: lifecycle,
+    startObserved: false,
+    initConversations: new Set(),
     hasInputLifecycle: false,
     closed: false,
     taskOwners: new Map(),
@@ -583,7 +539,7 @@ function createSession(capability?: CliBackendLiveSessionCapability): ClaudeCliS
       generation: randomUUID(),
       fingerprint: capability?.fingerprint ?? randomUUID(),
       isIdle: () => !session.closed && !session.currentTurn,
-      close: (_reason, error) => closeSession(session, error),
+      close: (reason, error) => closeSession(session, reason, error),
       waitForExit: async () => {
         const transport = session.transport ?? (await session.transportStartup);
         await transport?.waitForExit();
@@ -611,7 +567,7 @@ export async function* executeClaudeCli(
     await capability.restart();
   }
   context.assertCurrent?.();
-  const session = reusable ?? createSession(capability);
+  const session = reusable ?? createSession(capability, context.processLifecycle);
   session.capability = capability;
   if (session.closed || session.currentTurn) {
     throw new Error("Claude CLI live session is closed or already handling another turn.");
@@ -626,6 +582,9 @@ export async function* executeClaudeCli(
     inputUuid,
     submittedInputUuids: new Set([inputUuid]),
     inputStarted: false,
+    reused: Boolean(reusable),
+    useObserved: false,
+    conversations: new Set(),
     promptSubmitted: false,
     promptInputUuid: inputUuid,
     sawTerminalResult: false,
@@ -652,6 +611,19 @@ export async function* executeClaudeCli(
         session.transportStartup = createClaudeCliTransport({
           context,
           args,
+          onCommandStart: (observation) => {
+            if (observation.outcome === "started") {
+              session.startObserved = true;
+            }
+            observeLifecycle(() =>
+              session.launchLifecycle?.processStarted({
+                generation: session.handle.generation,
+                observation,
+                argvFacts: describeClaudeTransportArgs(args),
+                mode: capability ? "warm" : "one-shot",
+              }),
+            );
+          },
           secretInput,
           currentContext: () => session.currentTurn?.context,
           initialize: {

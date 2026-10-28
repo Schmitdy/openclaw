@@ -418,3 +418,59 @@ export type ExecApprovalStandingGrant = Static<typeof ExecApprovalStandingGrantS
 export type ExecApprovalGrantsListResult = Static<typeof ExecApprovalGrantsListResultSchema>;
 export type ExecApprovalGrantsRevokeParams = Static<typeof ExecApprovalGrantsRevokeParamsSchema>;
 export type ExecApprovalGrantsRevokeResult = Static<typeof ExecApprovalGrantsRevokeResultSchema>;
+
+const CronGrantInspectionRef = Type.String({ minLength: 1, maxLength: 256 });
+export const ExecApprovalGrantsInspectParamsSchema = closedObject({
+  runId: CronGrantInspectionRef,
+  grantId: CronGrantInspectionRef,
+  expected: Type.Optional(
+    closedObject({
+      command: Type.String({ minLength: 1, maxLength: 8192 }),
+      cwd: Type.Optional(Type.String({ maxLength: 4096 })),
+      env: Type.Optional(
+        Type.Record(Type.String(), Type.String({ maxLength: 8192 }), { maxProperties: 128 }),
+      ),
+    }),
+  ),
+});
+export const ExecApprovalGrantsInspectResultSchema = closedObject({
+  observedAtMs: Type.Integer({ minimum: 0 }),
+  source: closedObject({
+    registered: Type.Boolean(),
+    standingGrantAuthority: Type.Boolean(),
+    agentId: Type.Optional(CronGrantInspectionRef),
+    cronJobId: Type.Optional(CronGrantInspectionRef),
+    jobConfigRevision: Type.Optional(CronGrantInspectionRef),
+    receipt: Type.Optional(
+      closedObject({
+        receiptId: CronGrantInspectionRef,
+        startedAtMs: Type.Integer({ minimum: 0 }),
+      }),
+    ),
+  }),
+  grant: closedObject({
+    evaluated: Type.Boolean(),
+    found: Type.Optional(Type.Boolean()),
+    matchesSource: Type.Optional(Type.Boolean()),
+    mintedByApprovalId: Type.Optional(CronGrantInspectionRef),
+    outcome: Type.Optional(
+      stringLiteralUnion([
+        "consumed",
+        "no-grant",
+        "revoked",
+        "expired",
+        "job-revision-changed",
+        "job-missing",
+        "receipt-not-current",
+        "approval-missing",
+        "approval-not-allow-always",
+      ]),
+    ),
+    useCount: Type.Optional(Type.Integer({ minimum: 0 })),
+    lastUsedAtMs: Type.Optional(Type.Union([Type.Integer({ minimum: 0 }), Type.Null()])),
+    expiresAtMs: Type.Optional(Type.Union([Type.Integer({ minimum: 0 }), Type.Null()])),
+  }),
+  bindingMatches: Type.Optional(Type.Boolean()),
+});
+export type ExecApprovalGrantsInspectParams = Static<typeof ExecApprovalGrantsInspectParamsSchema>;
+export type ExecApprovalGrantsInspectResult = Static<typeof ExecApprovalGrantsInspectResultSchema>;

@@ -30,6 +30,7 @@ export async function resolveCliRuntimeToolPolicy(input: {
   params: RunCliAgentParams;
   runtimeToolsAllowPolicy: string[] | undefined;
   managedNativeTools: readonly string[];
+  inheritedPolicyFacts: { hardDenyAll: boolean | "not-resolved" };
 }> {
   let { params } = input;
   let runtimeToolsAllowPolicy: string[] | undefined;
@@ -169,7 +170,21 @@ export async function resolveCliRuntimeToolPolicy(input: {
       cliToolAvailability: { native: managedNativeTools, openClaw: exactWorkspaceTools ?? [] },
     };
   }
-  return { params, runtimeToolsAllowPolicy, managedNativeTools };
+  return {
+    params,
+    runtimeToolsAllowPolicy,
+    managedNativeTools,
+    inheritedPolicyFacts: {
+      hardDenyAll:
+        requesterPolicy === undefined
+          ? "not-resolved"
+          : Boolean(
+              requesterPolicy.inheritedToolPolicy?.deny?.some(
+                (name) => normalizeToolPolicyName(name) === "*",
+              ),
+            ),
+    },
+  };
 }
 
 /**
@@ -220,4 +235,18 @@ export function keptManagedNativeTools(
   params: Pick<RunCliAgentParams, "cliToolAvailability">,
 ): string[] {
   return managedNativeTools.filter((name) => params.cliToolAvailability?.native.includes(name));
+}
+
+/** Only personal Workshop has an invocation-bound node callback adapter. */
+export function narrowNodeClaudeAvailability(params: RunCliAgentParams): RunCliAgentParams {
+  if (!params.cliToolAvailability) {
+    return params;
+  }
+  return {
+    ...params,
+    cliToolAvailability: {
+      native: params.cliToolAvailability.native,
+      openClaw: params.cliToolAvailability.openClaw.filter((name) => name === "skill_workshop"),
+    },
+  };
 }

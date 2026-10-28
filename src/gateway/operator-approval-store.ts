@@ -477,3 +477,23 @@ export function readPlacementStandingGrant(
     (result) => (result.type === "operatorApprovals.placementGrant" ? result.rows : undefined),
   );
 }
+
+/** Descriptive reads never enter writable approval initialization or consume a grant. */
+export async function inspectCronStandingGrant(
+  params: import("./operator-approval-standing-grants.worker.js").CronStandingGrantInspectionInput &
+    Options,
+) {
+  const { databaseOptions, assertCurrent, guard, ...input } = params;
+  guard?.assertCurrent();
+  assertCurrent?.();
+  const result = await executeExistingOpenClawStateRead(databaseOptions ?? {}, {
+    type: "operatorApprovals.inspectCronGrant",
+    input,
+  });
+  guard?.assertCurrent();
+  assertCurrent?.();
+  if (!result?.ok || result.type !== "operatorApprovals.inspectCronGrant") {
+    throw new Error("Standing grant diagnostic read unavailable");
+  }
+  return result.result;
+}

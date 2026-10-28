@@ -1,4 +1,5 @@
 import type { CliBackendExecuteContext } from "openclaw/plugin-sdk/cli-backend";
+import { isClaudeRestrictedSettingsValue } from "./cli-shared.js";
 
 const PROTOCOL_FLAGS = new Set([
   "-p",
@@ -116,3 +117,42 @@ export function prepareClaudeCliTransportArgs(context: CliBackendExecuteContext)
   }
   return { args, excludeDynamicSections };
 }
+
+/** Facts about final argv, not claims about native runtime enforcement. */
+export function describeClaudeTransportArgs(args: readonly string[]) {
+  const values = new Map<string, string>();
+  const flags = new Set<string>();
+  for (let index = 0; index < args.length; index++) {
+    const raw = args[index]!;
+    if (!raw.startsWith("--")) {
+      continue;
+    }
+    const equals = raw.indexOf("=");
+    const flag = equals < 0 ? raw : raw.slice(0, equals);
+    flags.add(flag);
+    if (equals >= 0) {
+      values.set(flag, raw.slice(equals + 1));
+    } else if (args[index + 1] !== undefined && !args[index + 1]!.startsWith("--")) {
+      values.set(flag, args[++index]!);
+    }
+  }
+  return {
+    settingSourcesEmpty: values.get("--setting-sources") === "",
+    toolsFlagPresent: flags.has("--tools"),
+    toolsEmpty: values.get("--tools") === "",
+    allowedToolsPresent: flags.has("--allowedTools") || flags.has("--allowed-tools"),
+    strictMcpConfig: flags.has("--strict-mcp-config"),
+    disallowedHasMcpWildcard: (values.get("--disallowedTools") ?? "")
+      .split(/[ ,]+/u)
+      .includes("mcp__*"),
+    disableSlashCommands: flags.has("--disable-slash-commands"),
+    noChrome: flags.has("--no-chrome"),
+    restrictedSettingsExact: isClaudeRestrictedSettingsValue(values.get("--settings")),
+    sessionFlag: flags.has("--resume")
+      ? "resume"
+      : flags.has("--session-id")
+        ? "session-id"
+        : "none",
+  };
+}
+export type ClaudeTransportArgFacts = ReturnType<typeof describeClaudeTransportArgs>;

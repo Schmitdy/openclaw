@@ -3,10 +3,13 @@ import { settlesWithin } from "../shared/settle-within.js";
 import { createChildAdapter } from "./supervisor/adapters/child.js";
 import type {
   AwaitedStdoutConsumer,
+  OwnedStdioCommandStart,
   ProcessCleanupResult,
   SpawnProcessAdapter,
   SpawnSecretInput,
 } from "./supervisor/types.js";
+
+export type { OwnedStdioCommandStart } from "./supervisor/types.js";
 
 export type OwnedStdioProcess = SpawnProcessAdapter<NodeJS.Signals | null> &
   Required<Pick<SpawnProcessAdapter<NodeJS.Signals | null>, "onExit" | "onError">>;
@@ -15,6 +18,7 @@ export class OwnedStdioCleanupError extends Error {}
 
 export type OwnedStdioProcessOptions = {
   argv: string[];
+  onCommandStart?: (observation: OwnedStdioCommandStart) => void;
   argv0?: string;
   cwd?: string;
   env?: NodeJS.ProcessEnv;
@@ -40,10 +44,23 @@ export function createOwnedStdioProcess(
 export async function createOwnedStdioProcess(
   params: OwnedStdioProcessOptions,
 ): Promise<OwnedStdioProcess> {
+  let observed = false;
+  const onCommandStart = (observation: OwnedStdioCommandStart) => {
+    if (observed) {
+      return;
+    }
+    observed = true;
+    try {
+      params.onCommandStart?.(observation);
+    } catch {
+      /* Diagnostic callback has no authority. */
+    }
+  };
   let startupCleanup: Promise<boolean> | undefined;
   try {
     const { adapter, ready } = await createChildAdapter({
       ...params,
+      onCommandStart,
       ownProcessTree: true,
       stdinMode: "pipe-open",
       onSpawnCleanup: (cleanup) => {
@@ -56,6 +73,11 @@ export async function createOwnedStdioProcess(
     await ready;
     return adapter;
   } catch (error) {
+    onCommandStart({
+      outcome: "start-unknown",
+      spawnPath: "unresolved",
+      hostObservedAtMs: Date.now(),
+    });
     if (
       startupCleanup &&
       (!(await settlesWithin(startupCleanup, 500)) || !(await startupCleanup))

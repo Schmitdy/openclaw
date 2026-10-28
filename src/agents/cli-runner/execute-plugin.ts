@@ -18,6 +18,7 @@ import type {
   CliBackendUserInputRequest,
   CliBackendUserInputResult,
 } from "../../plugins/cli-backend.types.js";
+import { getPluginValueInstance } from "../../plugins/plugin-instance-scope.js";
 import type { RunExit, TerminationReason } from "../../process/supervisor/types.js";
 import { isHostGeneratedInputProvenance } from "../../sessions/input-provenance.js";
 import { assertionSucceeds } from "../../shared/assertion.js";
@@ -43,6 +44,7 @@ import {
   requestCliNativeToolApproval,
   resolveCliNativeToolApprovalPlan,
 } from "./cli-native-tool-approval.js";
+import { createCliProcessLifecycleFacts } from "./cli-process-lifecycle-facts.js";
 import { createCliAbortError } from "./execute-node-claude.js";
 import { closePluginIterator, waitForIteratorValue } from "./execute-plugin-iterator.js";
 import { createCliPluginWatchdog } from "./execute-plugin-watchdog.js";
@@ -472,6 +474,14 @@ export async function executePluginOwnedProcess(params: {
     },
   );
 
+  const processLifecycle =
+    getPluginValueInstance(params.execute)?.owner?.record.origin === "bundled"
+      ? createCliProcessLifecycleFacts({
+          token: run.admittedRunContext.executionIdentityToken,
+          availability: run.cliToolAvailability,
+          inheritedPolicyFacts: params.context.inheritedPolicyFacts,
+        })
+      : undefined;
   let iterator: AsyncIterator<Record<string, unknown>> | undefined;
   let liveSession: ReturnType<typeof createCliLiveSessionCapability> | undefined;
   let terminalResult: "none" | "success" | "error" = "none";
@@ -550,6 +560,7 @@ export async function executePluginOwnedProcess(params: {
     const started = await runWithAgentToolSourceExecutionScope(assertCurrent, async () => {
       assertCurrent();
       const execution = params.execute({
+        ...(processLifecycle ? { processLifecycle: processLifecycle.observer } : {}),
         command,
         argv0: params.executionArgv0,
         args: executionArgs,
@@ -695,7 +706,11 @@ export async function executePluginOwnedProcess(params: {
     // Closing the turn fences those capabilities before any outer cleanup runs.
     controller.abort(new Error("CLI plugin runtime turn is no longer active."));
     detachReplyBackend?.();
-    await closePluginIterator(iterator);
+    try {
+      await closePluginIterator(iterator);
+    } finally {
+      processLifecycle?.settle();
+    }
   }
 
   return {

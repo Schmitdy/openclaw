@@ -143,6 +143,7 @@ import {
   keptManagedNativeTools,
   resolveCliBootstrapFileAccess,
   resolveCliRuntimeToolPolicy,
+  narrowNodeClaudeAvailability,
 } from "./prepare-tool-policy.js";
 import {
   buildCliVisibleReplyGuidance,
@@ -327,7 +328,7 @@ async function prepareCliRunContextWithinReadFence(
     skipsTurnPreparation,
   });
   params = toolPolicy.params;
-  const { runtimeToolsAllowPolicy, managedNativeTools } = toolPolicy;
+  const { runtimeToolsAllowPolicy, managedNativeTools, inheritedPolicyFacts } = toolPolicy;
   const internalParams = params as RunCliAgentPrepareParams;
   const nodeClaudePlacement = detectNodeClaudePlacement({
     backendId: backendResolved.id,
@@ -336,15 +337,8 @@ async function prepareCliRunContextWithinReadFence(
   });
   params.assertCurrent?.();
   params.abortSignal?.throwIfAborted();
-  if (nodeClaudePlacement && params.cliToolAvailability) {
-    // Only the personal Workshop has an invocation-bound node callback adapter.
-    params = {
-      ...params,
-      cliToolAvailability: {
-        native: params.cliToolAvailability.native,
-        openClaw: params.cliToolAvailability.openClaw.filter((name) => name === "skill_workshop"),
-      },
-    };
+  if (nodeClaudePlacement) {
+    params = narrowNodeClaudeAvailability(params);
   }
   if (params.cliToolAvailability !== undefined && !canEnforceExactToolAvailability) {
     // Cron persists this verbatim and failure alerts truncate at 200 characters,
@@ -1636,6 +1630,7 @@ async function prepareCliRunContextWithinReadFence(
     });
     const buildPreparedContext = (preparedParams: PreparedCliRunContext["params"]) => ({
       params: preparedParams,
+      inheritedPolicyFacts,
       bindQuestionAnswerAuthority,
       sessionEventSourcePolicy,
       effectiveAuthProfileId,

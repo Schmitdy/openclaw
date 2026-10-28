@@ -66,7 +66,7 @@ import {
   buildExecApprovalTurnSourceContext,
   registerExecApprovalRequestForHostOrThrow,
 } from "./bash-tools.exec-approval-request.js";
-import { prepareCronStandingGrantConsumption } from "./bash-tools.exec-cron-grant.js";
+import { resolveCronStandingGrantGatewayApproval } from "./bash-tools.exec-cron-grant-approval.js";
 import {
   buildGatewayExecApprovalFollowupSummary,
   publishGatewayGuardianReview,
@@ -518,54 +518,15 @@ export async function processGatewayAllowlist(
     !requiresInlineEvalApproval &&
     !requiresHeredocApproval;
   if (cronStandingGrantEligible) {
-    let consumeGrant: Awaited<ReturnType<typeof prepareCronStandingGrantConsumption>>;
-    try {
-      consumeGrant = await prepareCronStandingGrantConsumption(params, cronExecutionSource, {
-        security: hostSecurity,
-        ask: hostAsk,
-      });
-    } catch {
-      consumeGrant = undefined;
-    }
-    if (consumeGrant) {
-      const consume = consumeGrant.consume;
-      const emitGrantEvent = (approved: boolean, reason: string) =>
-        emitApprovalEvent({
-          action: approved ? "exec.approval.approved" : "exec.approval.denied",
-          outcome: approved ? "success" : "denied",
-          severity: "medium",
-          reason,
-          decision: "standing-grant",
-        });
-      return {
-        execCommandOverride: enforcedCommand,
-        assertCurrent: consumeGrant.assertCurrent,
-        initiateSpawn: consumeGrant.initiateSpawn,
-        releaseSpawn: consumeGrant.releaseSpawn,
-        revalidateBeforeExecution: async () => {
-          let grantUse: Awaited<ReturnType<typeof consume>> | undefined;
-          try {
-            grantUse = await consume(params.signal);
-          } catch {
-            grantUse = undefined;
-          }
-          const grant = grantUse?.outcome === "consumed" ? grantUse.grant : undefined;
-          if (grant && (grant.expiresAtMs === null || grant.expiresAtMs > Date.now())) {
-            emitGrantEvent(
-              true,
-              `standing-grant grant=${grant.grantId} approval=${grant.mintedByApprovalId}`,
-            );
-            return undefined;
-          }
-          const reason = grant ? "expired" : (grantUse?.outcome ?? "grant-store-unavailable");
-          emitGrantEvent(false, `standing-grant-invalidated ${reason}`);
-          return buildGatewayExecApprovalDeniedToolResult({
-            deniedReason: `standing grant no longer valid (${reason}); the next occurrence will prompt for approval again`,
-            command: params.command,
-            cwd: params.workdir,
-          });
-        },
-      };
+    const granted = await resolveCronStandingGrantGatewayApproval(params, {
+      source: cronExecutionSource,
+      security: hostSecurity,
+      ask: hostAsk,
+      enforcedCommand,
+      emitApprovalEvent,
+    });
+    if (granted) {
+      return granted;
     }
   }
   const requiresAsk =

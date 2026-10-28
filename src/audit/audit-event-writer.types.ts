@@ -6,8 +6,10 @@ import type {
 } from "./audit-event-types.js";
 import type { ExecutionDecisionWork } from "./execution-decision-work.types.js";
 import type { ExecutionIdentityAdmissionWork } from "./execution-identity-admission.js";
+import type { NativeCustodyFactWork } from "./native-custody-facts.js";
 
 export type AuditWriterRequest =
+  | { type: "record-native-custody-fact"; work: NativeCustodyFactWork }
   | { type: "record-event"; eventId: string; input: AuditEventInput }
   | {
       type: "record-run";

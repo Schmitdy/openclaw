@@ -49,6 +49,7 @@ export {
   createOwnedStdioProcess,
   closeOwnedStdioProcess,
   type OwnedStdioProcess,
+  type OwnedStdioCommandStart,
   type OwnedStdioProcessOptions,
 } from "../process/owned-stdio.js";
 
