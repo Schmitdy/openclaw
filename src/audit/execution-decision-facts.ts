@@ -19,6 +19,7 @@ import {
   type OpenClawStateDatabaseOptions,
 } from "../state/openclaw-state-db.js";
 import { createOpenClawStateSchemaEnsurer } from "../state/openclaw-state-feature-schema-ensure.js";
+import { isNativeCustodyReceipt, isNativeCustodyOwner } from "./native-custody-brand.js";
 
 type ExecutionDecisionDatabase = Pick<
   OpenClawStateKyselyDatabase,
@@ -41,7 +42,7 @@ type ExecutionDecisionFactPage = {
 };
 
 const EXECUTION_DECISION_FACT_MAX_BYTES = 16 * 1024;
-const EXECUTION_DECISION_FACT_RETENTION_MS = 30 * 24 * 60 * 60_000;
+export const EXECUTION_DECISION_FACT_RETENTION_MS = 30 * 24 * 60 * 60_000;
 const EXECUTION_DECISION_FACT_MAX_ROWS = 250_000;
 const EXECUTION_DECISION_FACT_PRUNE_BATCH_ROWS = 1_024;
 const EXECUTION_DECISION_FACT_SUMMARY_MAX_ROWS = 128;
@@ -219,6 +220,9 @@ export function recordExecutionDecisionFactInDatabase(
   }
   if (receipt.source.owner === "operator_approvals") {
     throw new Error("operator approvals must be read from their owner-native table");
+  }
+  if (isNativeCustodyOwner(receipt.source.owner) && !isNativeCustodyReceipt(receipt)) {
+    throw new Error("native custody owners require the reserved writer");
   }
   const opened = openOpenClawStateDatabase(options);
   if (!hasExactExecutionContext(opened.db, receipt)) {

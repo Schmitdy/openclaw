@@ -10,6 +10,7 @@ import type {
 import type { AgentToolResult } from "./runtime/index.js";
 
 export type ProcessGatewayAllowlistParams = ExecHostCommandParams & {
+  executionIdentityToken?: import("../audit/execution-identity-admission.js").ExecutionIdentityAdmissionToken;
   workdir: string;
   secretEgressBindings?: readonly SecretEgressSentinelBinding[];
   githubProfileDir?: string;

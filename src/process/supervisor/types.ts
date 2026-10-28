@@ -61,7 +61,42 @@ export type SpawnSecretInput = {
   createData: () => Buffer;
 };
 
+/** Evidence from the physical command owner; hostObservedAtMs is not an OS creation time. */
+export type OwnedStdioCommandStart =
+  | {
+      outcome: "started";
+      commandPid: number;
+      anchorPid?: number;
+      spawnPath: "posix-relay" | "windows-job-direct" | "windows-job-anchor" | "direct";
+      observedBy:
+        | "anchor-command-spawned"
+        | "anchor-ready"
+        | "anchor-startup-error"
+        | "windows-job-spawned-control"
+        | "node-spawn-event";
+      hostObservedAtMs: number;
+      anchorObservedAtMs?: number;
+      sentInvocationDigest: string;
+      spawnedInvocationDigest?: string;
+    }
+  | {
+      outcome: "spawn-error-before-confirmation";
+      spawnPath: "posix-relay" | "windows-job-direct" | "windows-job-anchor" | "direct";
+      hostObservedAtMs: number;
+    }
+  | {
+      outcome: "start-unknown";
+      spawnPath:
+        | "posix-relay"
+        | "windows-job-direct"
+        | "windows-job-anchor"
+        | "direct"
+        | "unresolved";
+      hostObservedAtMs: number;
+    };
+
 export type ProcessAdapterConstruction = {
+  onCommandStart?: (observation: OwnedStdioCommandStart) => void;
   assertCurrent?: () => void;
   initiateSpawn?: SpawnInitiation;
   /** Synchronous launch admission; never recheck after the target command starts. */

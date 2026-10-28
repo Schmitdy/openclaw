@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { createDeferred } from "openclaw/plugin-sdk/extension-shared";
+import type { OwnedStdioCommandStart } from "openclaw/plugin-sdk/process-runtime";
 import { isRecord } from "openclaw/plugin-sdk/string-coerce-runtime";
 import {
   createClaudeCliProcessOwner,
@@ -24,6 +25,7 @@ export type ClaudeCliTransport = {
 export async function createClaudeCliTransport(params: {
   context: ClaudeCliProcessContext;
   args: string[];
+  onCommandStart?: (observation: OwnedStdioCommandStart) => void;
   initialize: Record<string, unknown>;
   currentContext: () => ClaudeCliProcessContext | undefined;
   secretInput?: ClaudeCliSecretInput;
@@ -40,6 +42,7 @@ export async function createClaudeCliTransport(params: {
     child = await owner.spawn({
       ...params.context,
       args: params.args,
+      onCommandStart: params.onCommandStart,
       env,
       signal: params.context.abortSignal,
     });

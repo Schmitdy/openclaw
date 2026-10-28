@@ -29,10 +29,7 @@ import { describeExecTool } from "./bash-tools.descriptions.js";
 import { processGatewayAllowlist } from "./bash-tools.exec-host-gateway.js";
 import { executeNodeHostCommand } from "./bash-tools.exec-host-node.js";
 import { ExecProcessPreflightError } from "./bash-tools.exec-launch.js";
-import {
-  buildExecRuntimeErrorOutcome,
-  EXEC_MANUAL_COLLECTION_FOLLOW_UP,
-} from "./bash-tools.exec-output.js";
+import { EXEC_MANUAL_COLLECTION_FOLLOW_UP } from "./bash-tools.exec-output.js";
 import {
   assertSupportedExecParams,
   createExecRequestPreparation,
@@ -56,6 +53,7 @@ import {
 import {
   attachExecApprovalReview,
   buildExecForegroundResult,
+  buildUnavailableWorkdirResult,
   resolveExecReviewerDefaults,
 } from "./bash-tools.exec-support.js";
 import { resolveExecElevatedMode, resolveExecHost } from "./bash-tools.exec-target.js";
@@ -64,7 +62,7 @@ import type {
   ExecToolDefaults,
   ExecToolDetails,
 } from "./bash-tools.exec-types.js";
-import { formatUnavailableWorkdirFailure, resolveExecWorkdir } from "./bash-tools.exec-workdir.js";
+import { resolveExecWorkdir } from "./bash-tools.exec-workdir.js";
 import { createExecSchema, execSchema } from "./bash-tools.schemas.js";
 import { clampWithDefault, readEnvInt } from "./bash-tools.shared.js";
 import {
@@ -75,7 +73,10 @@ import { resolveStoredSubagentCapabilities } from "./subagents/spawn/subagent-ca
 import { withPreparedSessionCapabilityRead } from "./subagents/spawn/subagent-session-store.js";
 import { EXEC_TOOL_DISPLAY_SUMMARY } from "./tool-description-presets.js";
 import type { AgentToolWithMeta } from "./tools/common.js";
-import { withoutGatewayToolCallerIdentity } from "./tools/gateway-caller-context.js";
+import {
+  getGatewayToolCallerIdentity,
+  withoutGatewayToolCallerIdentity,
+} from "./tools/gateway-caller-context.js";
 
 type GatewayApprovalResult = Awaited<ReturnType<typeof processGatewayAllowlist>>;
 
@@ -167,20 +168,6 @@ export function createExecTool(defaults?: ExecToolDefaults) {
   const agentId =
     defaults?.agentId ??
     (parsedAgentSession ? resolveAgentIdFromSessionKey(defaults?.sessionKey) : undefined);
-  const buildUnavailableWorkdirResult = (params: {
-    cwd: string;
-    startedAt?: number;
-    warningText?: string;
-  }) =>
-    buildExecForegroundResult({
-      outcome: buildExecRuntimeErrorOutcome({
-        error: formatUnavailableWorkdirFailure(params.cwd),
-        aggregated: "",
-        durationMs: params.startedAt ? Date.now() - params.startedAt : 0,
-      }),
-      cwd: params.cwd,
-      warningText: params.warningText,
-    });
   const requestPreparation = createExecRequestPreparation({
     defaults,
     agentId,
@@ -201,6 +188,7 @@ export function createExecTool(defaults?: ExecToolDefaults) {
     prepareBeforeToolCallParams: requestPreparation.prepareBeforeToolCallParams,
     finalizeBeforeToolCallParams: requestPreparation.finalizeBeforeToolCallParams,
     execute: async (toolCallId, args, signal, onUpdate) => {
+      const executionIdentityToken = getGatewayToolCallerIdentity()?.executionIdentityToken;
       signal?.throwIfAborted();
       const approvalTransport = defaults?.createApprovalTransport?.(toolCallId, signal);
       const assertSourceActive = captureAgentToolSourceExecutionGuard(signal);
@@ -502,6 +490,7 @@ export function createExecTool(defaults?: ExecToolDefaults) {
 
         if (host === "gateway" && !bypassApprovals) {
           gatewayApproval = await processGatewayAllowlist({
+            executionIdentityToken,
             ...hostApprovalParams(),
             workdir,
             secretEgressBindings,

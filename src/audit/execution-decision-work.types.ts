@@ -12,12 +12,12 @@ type ExecutionDecisionReceiptFacts = Omit<
 };
 
 type ExecutionDecisionResourceRef = {
-  namespace: "credential-profile";
+  namespace: "credential-profile" | "cli-invocation" | "cron-standing-grant";
   value: string;
 };
 
 type ExecutionDecisionTargetRef = {
-  namespace: "model-route" | "session";
+  namespace: "model-route" | "session" | "provider-conversation" | "cron-operation-binding";
   value: string;
 };
 

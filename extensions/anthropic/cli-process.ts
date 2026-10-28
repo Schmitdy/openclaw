@@ -4,6 +4,7 @@ import { redactSensitiveFieldValue, redactSensitiveText } from "openclaw/plugin-
 import {
   createOwnedStdioProcess,
   type OwnedStdioProcess,
+  type OwnedStdioCommandStart,
 } from "openclaw/plugin-sdk/process-runtime";
 import { sliceUtf16Safe } from "openclaw/plugin-sdk/text-utility-runtime";
 import { raceWithTimeout } from "openclaw/plugin-sdk/time-runtime";
@@ -13,6 +14,7 @@ type ClaudeCliSpawnOptions = Pick<
   "command" | "argv0" | "args" | "cwd" | "env"
 > & {
   signal?: AbortSignal;
+  onCommandStart?: (observation: OwnedStdioCommandStart) => void;
 };
 
 export type ClaudeCliProcessContext = Pick<
@@ -87,6 +89,7 @@ export function createClaudeCliProcessOwner(
       environment = options.env;
       const spawned = await createOwnedStdioProcess({
         argv: [options.command, ...options.args],
+        onCommandStart: options.onCommandStart,
         argv0: options.argv0,
         cwd: options.cwd,
         env: options.env,

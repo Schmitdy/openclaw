@@ -482,6 +482,7 @@ export function createGatewayAuxHandlers(
       "exec.approval.request": execApprovalHandler("exec.approval.request"),
       "exec.approval.waitDecision": execApprovalHandler("exec.approval.waitDecision"),
       "exec.approval.resolve": execApprovalHandler("exec.approval.resolve"),
+      "exec.approval.grants.inspect": execApprovalHandler("exec.approval.grants.inspect"),
       "exec.approval.grants.list": execApprovalHandler("exec.approval.grants.list"),
       "exec.approval.grants.revoke": execApprovalHandler("exec.approval.grants.revoke"),
       "plugin.approval.list": pluginApprovalHandler("plugin.approval.list"),

@@ -674,3 +674,33 @@ boundaries alongside the operator behavior above:
 - [Configuration reference](/gateway/config-observability#audit)
 - [Gateway protocol](/gateway/protocol/ledgers#audit-ledger-rpc)
 - [OpenTelemetry](/gateway/opentelemetry)
+
+## Native custody observations
+
+With execution identity collection enabled, the built-in CLI-process and cron
+standing-grant owners can enqueue diagnostic custody facts through the existing
+bounded audit writer. Generic decision producers cannot claim those reserved
+owners. Queue refusal or missing evidence never changes execution authority.
+
+`audit.run.custody` requires `operator.read` and accepts an exact `contextId` and
+`executionId`, an optional cursor, and a limit of at most 100. It reads only the
+reserved owners' retained records. Collection may be off when reading old facts;
+normal reader authorization, privacy projection, and retention still apply.
+Command, working-directory, environment, and provider-conversation values are not
+returned as raw references. Missing, corrupt, or expired evidence proves no
+custody claim.
+
+`exec.approval.grants.inspect` observes a registered cron occurrence and one
+standing grant without consuming it. `source.standingGrantAuthority` reports
+whether that registration carries standing-grant authority. `grant.evaluated`
+is false when no current authorized lookup was made; it does not mean the grant
+is absent. When evaluated, `found` and the lookup outcome describe that read.
+An optional expected operation binding yields only `bindingMatches`, not an echo
+of the stored command, directory, or environment. Inspection grants no execution
+permission and does not replace initiation-time authority checks.
+
+CLI process observations use `hostObservedAtMs` for host receipt time and optional
+`anchorObservedAtMs` for the anchor's reported observation time. Neither is an OS
+process creation timestamp. One-shot and reused processes retain separate launch,
+turn-use, retirement-request, and confirmed-exit facts; an unconfirmed exit stays
+unconfirmed. These facts do not certify provider behavior or deployed readiness.

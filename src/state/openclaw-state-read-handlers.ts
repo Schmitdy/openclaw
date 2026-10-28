@@ -16,6 +16,7 @@ import { readWorktreeRunLeaseStateInDatabase } from "../agents/worktrees/run-lea
 import { ExecutionDecisionCursorError } from "../audit/execution-decision-receipts.js";
 import { inspectExecutionIdentityRunInDatabase } from "../audit/execution-identity-context.js";
 import type { ExecutionIdentityInspectionOutcome } from "../audit/execution-identity-inspection.types.js";
+import { readNativeCustodyFactsInDatabase } from "../audit/native-custody-read.js";
 import { isChannelIngressReadCommand } from "../channels/message/ingress-queue-read-contract.js";
 import { readChannelIngressInDatabase } from "../channels/message/ingress-queue-read.worker.js";
 import { readClawStateCommandInDatabase } from "../claws/state-read.kernel.js";
@@ -31,6 +32,7 @@ import {
 import { readKnownRepositoryGitHubPublicationPullRequestUrlsInDatabase } from "../gateway/github-repository-publication-store.worker.js";
 import { readPlacementGrantRows } from "../gateway/operator-approval-placement-grants.read.worker.js";
 import {
+  inspectCronStandingGrantInDatabase,
   listCronStandingGrantsInDatabase,
   lookupCronStandingGrantInDatabase,
 } from "../gateway/operator-approval-standing-grants.worker.js";
@@ -243,6 +245,12 @@ export function readOpenClawStateDatabaseCommand(
       type: command.type,
       snapshot: readConfigSnapshotAuditRecordInDatabase(db),
     };
+  }
+  if (command.type === "audit.nativeCustody") {
+    return { type: command.type, result: readNativeCustodyFactsInDatabase(db, command.input) };
+  }
+  if (command.type === "operatorApprovals.inspectCronGrant") {
+    return { type: command.type, result: inspectCronStandingGrantInDatabase(db, command.input) };
   }
   if (command.type === "audit.run.inspect") {
     try {

@@ -38,6 +38,7 @@ export function formatAuditWriterRequestError(request: AuditWriterRequest, error
     return executionIdentityFailureMessage(error);
   }
   if (
+    request.type === "record-native-custody-fact" ||
     request.type === "record-execution-decision" ||
     request.type === "record-execution-decision-work"
   ) {

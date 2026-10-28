@@ -9,6 +9,8 @@ export {
   isComputerInvokeParams,
   isAuditActivityListParams,
   isAuditRunInspectParams,
+  isAuditRunCustodyParams,
+  isExecApprovalGrantsInspectParams,
   isAuditListParams,
   isWakeParams,
   isProgressCardGetParams,

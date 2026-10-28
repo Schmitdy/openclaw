@@ -5,6 +5,7 @@ import {
   configureExecutionIdentityAdmissionSink,
   hasExecutionIdentityAdmissionSink,
 } from "../audit/execution-identity-admission.js";
+import { configureNativeCustodyFactSink } from "../audit/native-custody-facts.js";
 import { configureRuntimeActionDecisionSink } from "../audit/runtime-action-decision.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { GatewayScheduler } from "../infra/gateway-scheduler.js";
@@ -26,6 +27,7 @@ export function startAgentLocalAuditWriter(
   const clearAdmissionSink = configureExecutionIdentityAdmissionSink(
     recorder.recordExecutionIdentity,
   );
+  const clearNativeCustodySink = configureNativeCustodyFactSink(recorder.recordNativeCustodyFact);
   const clearDecisionWorkSink = configureExecutionDecisionWorkSink(
     recorder.recordExecutionDecisionWork,
   );
@@ -34,6 +36,7 @@ export function startAgentLocalAuditWriter(
   );
   return async () => {
     scheduler.beginClose();
+    clearNativeCustodySink();
     clearRuntimeActionSink();
     clearDecisionWorkSink();
     clearAdmissionSink();

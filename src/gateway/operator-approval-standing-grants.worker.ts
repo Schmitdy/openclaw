@@ -33,6 +33,7 @@ import {
   type OpenClawStateDatabaseOptions,
 } from "../state/openclaw-state-db.js";
 import { getOpenClawStateFeatureSchemaSql } from "../state/openclaw-state-feature-schema.js";
+import { buildCronExecOperationBinding } from "./operator-approval-standing-grants.js";
 import type {
   CronStandingGrantMintSpec,
   CronStandingGrantLookupInput,
@@ -524,4 +525,78 @@ export function revokeCronStandingGrantInDatabase(params: {
       },
     };
   }, params.databaseOptions);
+}
+
+export type CronStandingGrantInspectionInput = {
+  grantId: string;
+  source: Pick<
+    CronStandingGrantLookupInput,
+    "agentId" | "cronJobId" | "jobConfigRevision" | "handle"
+  >;
+  expected?: import("../../packages/gateway-protocol/src/schema/exec-approvals.js").ExecApprovalGrantsInspectParams["expected"];
+};
+
+/** Primary-key observation only: no schema initialization, consumption or mutation publication. */
+export function inspectCronStandingGrantInDatabase(
+  db: EngineConnection,
+  input: CronStandingGrantInspectionInput,
+): Pick<
+  import("../../packages/gateway-protocol/src/schema/exec-approvals.js").ExecApprovalGrantsInspectResult,
+  "grant" | "bindingMatches"
+> {
+  return runSqliteDeferredTransactionSync(db, () => {
+    if (!tableExists(db, STANDING_GRANT_TABLE)) {
+      return { grant: { evaluated: true, found: false } };
+    }
+    const grant = executeSqliteQueryTakeFirstSync(
+      db,
+      getNodeSqliteKysely<StandingGrantDatabase>(db)
+        .selectFrom(STANDING_GRANT_TABLE)
+        .selectAll()
+        .where("grant_id", "=", input.grantId)
+        .where("agent_id", "=", input.source.agentId)
+        .where("cron_job_id", "=", input.source.cronJobId),
+    );
+    if (!grant) {
+      return { grant: { evaluated: true, found: false } };
+    }
+    const matchesSource =
+      grant.agent_id === input.source.agentId && grant.cron_job_id === input.source.cronJobId;
+    const result = matchesSource
+      ? lookupCronStandingGrantInDatabase(
+          db,
+          {
+            ...input.source,
+            operationBinding: grant.operation_binding,
+            expectedGrant: {
+              grantId: grant.grant_id,
+              mintedByApprovalId: grant.minted_by_approval_id,
+            },
+          },
+          false,
+        )
+      : undefined;
+    return {
+      grant: {
+        evaluated: true,
+        found: true,
+        matchesSource,
+        mintedByApprovalId: grant.minted_by_approval_id,
+        ...(result ? { outcome: result.outcome } : {}),
+        useCount: grant.use_count,
+        lastUsedAtMs: grant.last_used_at_ms,
+        expiresAtMs: grant.expires_at_ms,
+      },
+      ...(input.expected
+        ? {
+            bindingMatches:
+              buildCronExecOperationBinding({
+                command: input.expected.command,
+                cwd: input.expected.cwd,
+                env: input.expected.env,
+              }) === grant.operation_binding,
+          }
+        : {}),
+    };
+  });
 }

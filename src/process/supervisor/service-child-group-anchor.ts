@@ -1,16 +1,16 @@
 import type { ChildProcess } from "node:child_process";
+import { createHash } from "node:crypto";
 import { once } from "node:events";
 import { closeSync } from "node:fs";
-import { createRequire } from "node:module";
 import { Socket } from "node:net";
 import { pipeline, type Readable } from "node:stream";
 import { isRecord } from "@openclaw/normalization-core/record-coerce";
 import { createDeferredCore } from "../../shared/deferred.js";
 import { spawnWithInheritedOomScore } from "../linux-oom-score.js";
 import { serializeBrokerError } from "../spawn-broker/protocol.js";
-import type { SpawnStdioEntry } from "../spawn-secret-input.js";
 import { GRACEFUL_CANCEL_TIMEOUT_MS } from "./cancellation-policy.js";
 import { monotonicDeadline } from "./monotonic-deadline.js";
+import { commandStdio, delay, loadBunOutputShutdown } from "./service-child-group-io.js";
 import {
   hasLiveOwnedProcessGroupMembers,
   killOwnedProcessGroupMembers,
@@ -22,39 +22,9 @@ import {
   type ServiceChildControlMessage,
   type ServiceChildStart,
 } from "./service-child-protocol.js";
-import { reserveStdioEntry, setStdioEntry } from "./service-child-stdio.js";
 
 type AnchorState = "starting" | "active" | "closing" | "closed";
 declare const WORKER_DEPLOY_BUILD: boolean;
-
-function commandStdio(start: ServiceChildStart) {
-  const stdio: SpawnStdioEntry[] = [
-    start.stdinMode === "inherit" ? "inherit" : "pipe",
-    "pipe",
-    "pipe",
-  ];
-  if (start.secretFd !== undefined) {
-    setStdioEntry(stdio, start.secretFd, start.secretFd);
-  }
-  const lineageFd = reserveStdioEntry(stdio, start.lineageFd ?? "pipe");
-  const inheritedLineageFds = [
-    lineageFd,
-    ...(start.parentLineageFds ?? []).map((fd) => reserveStdioEntry(stdio, fd)),
-  ];
-  if (start.ownedWorker) {
-    stdio.push("ipc");
-  }
-  return { stdio, lineageFd, inheritedLineageFds };
-}
-
-function delay(ms: number, retainOwner = false): Promise<void> {
-  return new Promise((resolve) => {
-    const timer = setTimeout(resolve, ms);
-    if (!retainOwner) {
-      timer.unref?.();
-    }
-  });
-}
 
 export function runServiceChildGroupAnchor(): void {
   const launchGrant = createDeferredCore();
@@ -67,6 +37,8 @@ export function runServiceChildGroupAnchor(): void {
   let sequence = 0;
   let lastHostSequence = 0;
   let command: ChildProcess | undefined;
+  let commandSpawned = false;
+  let spawnedInvocationDigest: string | undefined;
   let lineageCompletion:
     | typeof import("../../node-host/node-worker-lineage-completion.js")
     | undefined;
@@ -204,6 +176,7 @@ export function runServiceChildGroupAnchor(): void {
     await send({
       type: "startup-error",
       anchorPid: process.pid,
+      ...(commandSpawned ? { commandSpawned: true as const, commandPid: command?.pid } : {}),
       error: error instanceof Error ? error.message : error,
       ...(error instanceof Error ? { errorDetails: serializeBrokerError(error) } : {}),
     });
@@ -551,34 +524,40 @@ export function runServiceChildGroupAnchor(): void {
     workerLineageFds = inheritedLineageFds;
     let shutdownOutput: ((fd: number, how: number) => number) | undefined;
     try {
-      if (process.versions.bun && (process.platform === "darwin" || process.platform === "linux")) {
-        // SAFETY: Bun's built-in FFI binds only the POSIX socket shutdown ABI here.
-        const ffi = createRequire(import.meta.url)("bun:ffi") as {
-          dlopen(
-            path: string,
-            symbols: Record<string, { args: string[]; returns: string }>,
-          ): {
-            symbols: { shutdown: (fd: number, how: number) => number };
-          };
-        };
-        const library = process.platform === "darwin" ? "/usr/lib/libSystem.B.dylib" : "libc.so.6";
-        shutdownOutput = ffi.dlopen(library, {
-          shutdown: { args: ["i32", "i32"], returns: "i32" },
-        }).symbols.shutdown;
-      }
-      command = spawnWithInheritedOomScore(start.command, start.args, {
-        cwd: start.cwd,
-        env: start.env,
-        argv0: start.argv0,
-        stdio,
-        detached: false,
-        windowsHide: true,
-      });
+      shutdownOutput = loadBunOutputShutdown();
+      command = spawnWithInheritedOomScore(
+        start.command,
+        start.args,
+        {
+          cwd: start.cwd,
+          env: start.env,
+          argv0: start.argv0,
+          stdio,
+          detached: false,
+          windowsHide: true,
+        },
+        (nativeCommand, nativeArgs) => {
+          spawnedInvocationDigest = createHash("sha256")
+            .update(JSON.stringify([nativeCommand, ...nativeArgs]))
+            .digest("hex");
+        },
+      );
       if (command.pid) {
         subreaper?.retainSpawnedChild(command.pid, command);
       }
       // Failed Bun spawns have no stdio. Preserve the spawn error before checking lineage.
       await once(command, "spawn");
+      commandSpawned = true;
+      // Queue before readiness: private input and lineage setup may still fail.
+      if (command.pid && spawnedInvocationDigest) {
+        void send({
+          type: "command-spawned",
+          commandPid: command.pid,
+          anchorPid: process.pid,
+          spawnedInvocationDigest,
+          anchorObservedAtMs: Date.now(),
+        });
+      }
     } catch (error) {
       await reportStartupFailure(error instanceof Error ? error : String(error));
       return;
@@ -619,7 +598,13 @@ export function runServiceChildGroupAnchor(): void {
       // SAFETY: without a host descriptor, commandStdio reserves this entry as a pipe.
       const lineage = command.stdio[lineageFd] as Readable | null;
       if (!lineage) {
-        await send({ type: "startup-error", error: "command lineage pipe was not created" });
+        await send({
+          type: "startup-error",
+          error: "command lineage pipe was not created",
+          commandSpawned: true,
+          commandPid: command.pid,
+          anchorPid: process.pid,
+        });
         await requestCleanup("lineage-lost", "SIGKILL");
         return;
       }

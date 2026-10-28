@@ -1153,6 +1153,16 @@ export function isAuditActivityListParams(
 export function isAuditRunInspectParams(
   value: unknown,
 ): value is import("../../schema/audit-run.js").AuditRunInspectParams;
+export function isAuditRunCustodyParams(
+  value: unknown,
+): value is import("typebox").Static<
+  typeof import("../../schema-modules.js").AuditRunCustodyParamsSchema
+>;
+export function isExecApprovalGrantsInspectParams(
+  value: unknown,
+): value is import("typebox").Static<
+  typeof import("../../schema-modules.js").ExecApprovalGrantsInspectParamsSchema
+>;
 export function isAuditListParams(
   value: unknown,
 ): value is import("typebox").Static<

@@ -9,6 +9,7 @@ import {
   validateAuditActivityListParams,
   validateAuditListParams,
   validateAuditRunInspectParams,
+  validateAuditRunCustodyParams,
 } from "../../../packages/gateway-protocol/src/index.js";
 import {
   findAuditActivityFilterConflict,
@@ -23,6 +24,11 @@ import {
 } from "../../audit/execution-decision-receipts.js";
 import { inspectExecutionIdentityRun } from "../../audit/execution-identity-context.js";
 import type { InternalAuditRunInspectResult } from "../../audit/execution-identity-inspection.types.js";
+import {
+  readNativeCustodyFacts,
+  parseNativeCustodyCursor,
+} from "../../audit/native-custody-read.js";
+import { readGatewayRequestMutationAuthority } from "./session-mutation-guards.js";
 import type { GatewayRequestHandlers } from "./types.js";
 import { assertValidParams } from "./validation.js";
 
@@ -128,6 +134,40 @@ function readAuditListPage(
 }
 
 export const auditHandlers: GatewayRequestHandlers = {
+  "audit.run.custody": async (options) => {
+    const { params, respond } = options;
+    if (!assertValidParams(params, validateAuditRunCustodyParams, "audit.run.custody", respond)) {
+      return;
+    }
+    try {
+      parseNativeCustodyCursor(params.cursor);
+    } catch {
+      respond(
+        false,
+        undefined,
+        errorShape(ErrorCodes.INVALID_REQUEST, "invalid native custody cursor"),
+      );
+      return;
+    }
+    const authority = readGatewayRequestMutationAuthority(options);
+    authority.assertCurrent();
+    try {
+      const result = await readNativeCustodyFacts(params);
+      authority.assertCurrent();
+      respond(true, result);
+    } catch (error) {
+      authority.assertCurrent();
+      if (
+        error instanceof Error &&
+        error.message === "native custody cursor is no longer retained"
+      ) {
+        respond(false, undefined, errorShape(ErrorCodes.INVALID_REQUEST, error.message));
+        return;
+      }
+      throw error;
+    }
+  },
+
   "audit.list": async ({ params, respond }) => {
     if (!assertValidParams(params, validateAuditListParams, "audit.list", respond)) {
       return;

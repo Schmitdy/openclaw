@@ -68,6 +68,16 @@ export type OpenClawStateReadAuthority = {
 };
 
 export type OpenClawStateReadCommand =
+  | {
+      type: "audit.nativeCustody";
+      input: import("../../packages/gateway-protocol/src/schema/audit-run.js").AuditRunCustodyParams & {
+        now: number;
+      };
+    }
+  | {
+      type: "operatorApprovals.inspectCronGrant";
+      input: import("../gateway/operator-approval-standing-grants.worker.js").CronStandingGrantInspectionInput;
+    }
   | TranscriptExportCommand
   | RegisteredStateReadCommand
   | { type: "localWorkspace.manifest"; input: LocalWorkspaceManifestInput }

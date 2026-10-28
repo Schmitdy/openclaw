@@ -40,6 +40,15 @@ export const validateAuditRunInspectParams = createProtocolValidator<AuditRunIns
   S.AuditRunInspectParamsSchema,
   Checks.isAuditRunInspectParams,
 );
+export const validateAuditRunCustodyParams = createProtocolValidator(
+  S.AuditRunCustodyParamsSchema,
+  Checks.isAuditRunCustodyParams,
+);
+export const validateExecApprovalGrantsInspectParams = createProtocolValidator(
+  S.ExecApprovalGrantsInspectParamsSchema,
+  Checks.isExecApprovalGrantsInspectParams,
+);
+
 export const validateAuditListParams = createProtocolValidator(
   S.AuditListParamsSchema,
   Checks.isAuditListParams,

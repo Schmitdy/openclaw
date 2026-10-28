@@ -20,6 +20,7 @@ import type { AuditWriterOperations } from "./audit-event-writer.worker.js";
 import { parseExecutionDecisionWork } from "./execution-decision-work.js";
 import type { ExecutionDecisionWork } from "./execution-decision-work.types.js";
 import type { ExecutionIdentityAdmissionWork } from "./execution-identity-admission.js";
+import { parseNativeCustodyFactWork, type NativeCustodyFactWork } from "./native-custody-facts.js";
 
 const MAX_PENDING_AUDIT_EVENTS = 4_096;
 const MAX_AUDIT_BATCH_SIZE = 32;
@@ -35,6 +36,8 @@ type AuditMaintenanceAttempt = "settled" | "more" | "retry";
 
 export type AuditEventWriter = {
   ready: Promise<void>;
+  /** Optional diagnostic capability; refusal never changes execution authority. */
+  recordNativeCustodyFact?: (work: NativeCustodyFactWork) => boolean;
   record: (input: AuditEventInput) => boolean;
   recordRun: (
     start: AgentRunStartedAuditEventInput,
@@ -312,9 +315,11 @@ export function createAuditEventWriter(options: {
     }
     try {
       const boundedMessage =
-        message.type === "record-execution-decision-work"
-          ? { ...message, work: parseExecutionDecisionWork(message.work) }
-          : message;
+        message.type === "record-native-custody-fact"
+          ? { ...message, work: parseNativeCustodyFactWork(message.work) }
+          : message.type === "record-execution-decision-work"
+            ? { ...message, work: parseExecutionDecisionWork(message.work) }
+            : message;
       // Preserve the former Worker boundary's clone and prototype-stripping contract.
       queue.push(structuredClone(boundedMessage));
       pendingRows += rows;
@@ -338,6 +343,7 @@ export function createAuditEventWriter(options: {
 
   return {
     ready,
+    recordNativeCustodyFact: (work) => enqueue({ type: "record-native-custody-fact", work }),
     record: (input) => enqueue({ type: "record-event", eventId: randomUUID(), input }),
     recordRun: (start, finish) =>
       enqueue({ type: "record-run", start, finish, eventIds: [randomUUID(), randomUUID()] }),

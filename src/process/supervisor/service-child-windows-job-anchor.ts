@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { coerceErrorMessage } from "@openclaw/normalization-core/error-coercion";
 import { WindowsJob, type WindowsJobChild } from "@openclaw/proc-safe/windows-job";
 import { mergeProcessEnv, resolveEnvironmentValue } from "../../infra/process-env.js";
@@ -325,7 +326,13 @@ export function runServiceChildWindowsJobAnchor(): void {
     if (!process.connected) {
       return;
     }
-    await send({ type: "startup-error", error: coerceErrorMessage(error) });
+    await send({
+      type: "startup-error",
+      error: coerceErrorMessage(error),
+      ...(child
+        ? { commandSpawned: true as const, commandPid: child.pid, anchorPid: process.pid }
+        : {}),
+    });
     await startupErrorAcknowledged.promise;
   };
 
@@ -347,10 +354,11 @@ export function runServiceChildWindowsJobAnchor(): void {
       }
       const shell =
         resolveEnvironmentValue(next.env, "COMSPEC", "win32") || getWindowsCmdExePath(next.env);
+      const commandLine = `"${shell}" /d /s /c "${next.windowsShellCommand}"`;
       // Admission and the inherited-handle allowlist are atomic inside the native owner.
       child = job.spawn({
         executable: shell,
-        commandLine: `"${shell}" /d /s /c "${next.windowsShellCommand}"`,
+        commandLine,
         cwd: next.cwd,
         // ARM64 cmd.exe needs SystemRoot even when the command replaces its environment.
         env:
@@ -365,6 +373,15 @@ export function runServiceChildWindowsJobAnchor(): void {
               ),
       });
       const commandPid = child.pid;
+      void send({
+        type: "command-spawned",
+        commandPid,
+        anchorPid: process.pid,
+        spawnedInvocationDigest: createHash("sha256")
+          .update(JSON.stringify([shell, commandLine]))
+          .digest("hex"),
+        anchorObservedAtMs: Date.now(),
+      }).catch(() => {});
       outputStreams.push({ name: "stdout", ended: false }, { name: "stderr", ended: false });
       for (const stream of outputStreams) {
         stream.decoder = createWindowsOutputDecoder();

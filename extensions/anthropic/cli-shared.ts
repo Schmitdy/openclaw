@@ -39,6 +39,10 @@ const CLAUDE_DENY_MCP_TOOLS_VALUE = "mcp__*";
 const CLAUDE_RESTRICTED_SETTINGS =
   '{"disableAllHooks":true,"enabledPlugins":{},"autoMemoryEnabled":false,"claudeMdExcludes":["**/CLAUDE.md","**/CLAUDE.local.md","**/.claude/rules/**"]}';
 
+export function isClaudeRestrictedSettingsValue(value: string | undefined): boolean {
+  return value === CLAUDE_RESTRICTED_SETTINGS;
+}
+
 export function isClaudeCliProvider(providerId: string): boolean {
   return normalizeOptionalLowercaseString(providerId) === CLAUDE_CLI_BACKEND_ID;
 }

@@ -19,6 +19,7 @@ const log = createSubsystemLogger("audit/events");
 let persistenceFailureWarned = false;
 
 type AuditEventRecorder = AgentEventAuditRecorder & {
+  recordNativeCustodyFact: NonNullable<AuditEventWriter["recordNativeCustodyFact"]>;
   recordMessage: (event: TrustedMessageAuditEvent) => void;
   recordExecutionIdentity: AuditEventWriter["recordExecutionIdentity"];
   recordExecutionDecision: AuditEventWriter["recordExecutionDecision"];
@@ -54,6 +55,9 @@ export function createAuditEventRecorder(options: {
 
   return {
     ...agentRecorder,
+    recordNativeCustodyFact: (work) =>
+      isExecutionIdentityCollectionEnabled(options.getConfig()) &&
+      writer.recordNativeCustodyFact?.(work) === true,
     recordExecutionIdentity: (work) =>
       isExecutionIdentityCollectionEnabled(options.getConfig()) &&
       writer.recordExecutionIdentity(work),

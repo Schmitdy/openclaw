@@ -2,11 +2,13 @@ import type { Writable } from "node:stream";
 import { resolveRuntimeProcessEntrypointUrl } from "../../infra/runtime-process-url.js";
 import type { NodeWorkerCleanupBinding } from "../../node-host/node-worker-launch-receipt.js";
 import { prepareSecretInputStdio, type SpawnStdioEntry } from "../spawn-secret-input.js";
+import { toStringEnv } from "./adapters/env.js";
 import {
   getInheritedNativeProcessOwner,
   getInheritedProcessLineageFds,
 } from "./inherited-process-lineage.js";
 import { assertProcessGroupControl } from "./service-child-group-ownership.js";
+import type { ServiceChildStart } from "./service-child-protocol.js";
 import { supportsNodeWorkerProcessOwner } from "./service-child-protocol.js";
 import { reserveStdioEntry } from "./service-child-stdio.js";
 import type { ProcessAdapterConstruction, SpawnProcessAdapter, SpawnSecretInput } from "./types.js";
@@ -131,4 +133,30 @@ export function prepareServiceChildRelay(params: ServiceChildRelayParams) {
     deliveryOwner[Symbol.dispose]();
     throw error;
   }
+}
+
+export function buildServiceChildStartFrame(
+  params: ServiceChildRelayParams,
+  preparation: ReturnType<typeof prepareServiceChildRelay>,
+  generation: string,
+  acknowledgeClosing: boolean,
+): ServiceChildStart {
+  return {
+    type: params.initiateSpawn ? "prepare" : "start",
+    generation,
+    command: params.command,
+    args: params.args,
+    argv0: params.argv0,
+    cwd: params.cwd,
+    env: toStringEnv(params.env ?? process.env),
+    stdinMode: params.stdinMode,
+    secretFd: params.secretInput?.fd,
+    terminateOnHostLoss: params.terminateOnHostLoss,
+    controlFd: preparation.controlFd,
+    ...preparation.ownership,
+    treeOwnership: preparation.useLinuxSubreaper ? "linux-subreaper" : undefined,
+    nativeProcessOwner: preparation.nativeProcessOwner,
+    ...(acknowledgeClosing ? { acknowledgeClosing: true as const } : {}),
+    windowsShellCommand: params.windowsShellCommand,
+  };
 }

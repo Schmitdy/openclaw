@@ -210,6 +210,7 @@ export function captureCliRunStartTime() {
 }
 
 export type PreparedCliRunContext = {
+  inheritedPolicyFacts?: { hardDenyAll: boolean | "not-resolved" };
   params: RunCliAgentParams & { admittedRunContext: AdmittedRunContext };
   /** Original host policy, retained before native tool translation consumes runtime caps. */
   sessionEventSourcePolicy?: SessionEventSourcePolicy;
