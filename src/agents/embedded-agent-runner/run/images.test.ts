@@ -78,7 +78,9 @@ describe("prompt image preparation", () => {
   it.each(["inline", "offloaded"] as const)(
     "replays stale SVG %s ownership as a file while preserving the PNG index",
     async (kind) => {
-      const svgBytes = Buffer.from('<svg xmlns="http://www.w3.org/2000/svg"><path d="M0 0"/></svg>');
+      const svgBytes = Buffer.from(
+        '<svg xmlns="http://www.w3.org/2000/svg"><path d="M0 0"/></svg>',
+      );
       const workspaceDir = await imageWorkspace({ "logo.svg": svgBytes, "photo.png": undefined });
       const svg = {
         path: path.join(workspaceDir, "logo.svg"),
@@ -98,7 +100,10 @@ describe("prompt image preparation", () => {
         __openclaw: {
           media: [svg, png],
           mediaImageLayout: {
-            slots: [{ kind, factIndex: 0 }, { kind: "inline", factIndex: 1 }],
+            slots: [
+              { kind, factIndex: 0 },
+              { kind: "inline", factIndex: 1 },
+            ],
           },
         },
       };
@@ -421,15 +426,18 @@ describe("detectAndLoadPromptImages", () => {
     expect(result.imageFactIndexes).toEqual([1]);
   });
 
-  it.each([undefined, 0, 7])("keeps unresolved inline ownership fail-closed: %s", async (factIndex) => {
-    const result = await loadImages({
-      prompt: "Read the image",
-      workspaceDir: "/tmp",
-      media: [{}],
-      mediaImageLayout: { slots: [{ kind: "inline", factIndex }] },
-    });
-    expect(result.failedMediaCount).toBe(1);
-  });
+  it.each([undefined, 0, 7])(
+    "keeps unresolved inline ownership fail-closed: %s",
+    async (factIndex) => {
+      const result = await loadImages({
+        prompt: "Read the image",
+        workspaceDir: "/tmp",
+        media: [{}],
+        mediaImageLayout: { slots: [{ kind: "inline", factIndex }] },
+      });
+      expect(result.failedMediaCount).toBe(1);
+    },
+  );
 
   it("retains inline PNG when its present fact has no known media kind", async () => {
     const result = await loadImages({

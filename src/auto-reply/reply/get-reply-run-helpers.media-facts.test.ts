@@ -9,9 +9,9 @@ describe("persisted media image layout", () => {
   it.each([
     { name: "filename-only SVG", media: { path: "/tmp/diagram.svg" }, image: false },
     {
-      name: "explicit image-kind SVG",
+      name: "stale image-kind SVG remains a document",
       media: { path: "/tmp/diagram.svg", kind: "image" as const },
-      image: true,
+      image: false,
     },
     {
       name: "separate image filename with opaque source",
