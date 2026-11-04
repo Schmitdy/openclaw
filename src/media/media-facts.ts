@@ -402,20 +402,23 @@ function normalizeMediaFact<TInput extends MediaFactInput>(
   // slots must remain empty facts instead of crashing transcript hydration.
   const input = asNonArrayRecord(media) as TInput;
   const workspaceDir = normalizeOptionalString(input.workspaceDir) ?? defaults.workspaceDir;
+  const path = normalizeOptionalString(input.path);
+  const url = normalizeOptionalString(input.url);
+  const fileName = normalizeOptionalString(input.fileName);
   const contentType = normalizeOptionalString(input.contentType);
   const durationMs = normalizePositiveInteger(input.durationMs);
   const width = normalizePositiveInteger(input.width);
   const height = normalizePositiveInteger(input.height);
   return {
-    path: normalizeOptionalString(input.path),
-    url: normalizeOptionalString(input.url),
+    path,
+    url,
     contentType,
-    kind: isSvgMediaFact(input)
+    kind: isSvgMediaFact({ path, url, fileName, contentType })
       ? "document"
       : ((typeof input.kind === "string" ? input.kind : undefined) ??
         defaults.kind ??
         (isGenericBinaryMediaContentType(contentType) ? undefined : kindFromMime(contentType))),
-    fileName: normalizeOptionalString(input.fileName),
+    fileName,
     ...(input.origin === "paste" || input.origin === "file" ? { origin: input.origin } : {}),
     sizeBytes: asFiniteNumberInRange(input.sizeBytes, { min: 0 }),
     ...(durationMs ? { durationMs } : {}),

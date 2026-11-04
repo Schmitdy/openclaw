@@ -11,6 +11,35 @@ import {
 const canonicalFact = { path: "/media/canonical.png", contentType: "image/png" };
 
 describe("canonical persisted media", () => {
+  it("sanitizes malformed fields before classifying SVG without moving attachment slots", () => {
+    const malformed = [
+      null,
+      { path: 123 },
+      { url: true },
+      { contentType: { nope: true } },
+      { fileName: ["logo.svg"] },
+      { path: "/tmp/logo.svg", contentType: { nope: true }, kind: "image" },
+    ];
+    const original = JSON.stringify(malformed);
+    const facts = normalizeMediaFacts(
+      malformed as unknown as Parameters<typeof normalizeMediaFacts>[0],
+    );
+    expect(facts).toHaveLength(6);
+    for (const fact of facts.slice(0, 5)) {
+      expect(fact.path).toBeUndefined();
+      expect(fact.url).toBeUndefined();
+      expect(fact.contentType).toBeUndefined();
+      expect(fact.fileName).toBeUndefined();
+      expect(isImageMediaFact(fact)).toBe(false);
+    }
+    expect(facts[5]).toMatchObject({
+      path: "/tmp/logo.svg",
+      contentType: undefined,
+      kind: "document",
+    });
+    expect(JSON.stringify(malformed)).toBe(original);
+  });
+
   it.each([
     {
       name: "legacy-only",
