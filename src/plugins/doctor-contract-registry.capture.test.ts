@@ -159,3 +159,45 @@ it("keeps other plugin migrations available after a dependency link cannot be cr
     }),
   ).toEqual({ changes: ["healthy migration ran"], warnings: [] });
 });
+
+it("retains migration obligations after a contract throws a missing-file error", async () => {
+  const rootDir = dirs.make("doctor-contract-missing-resource-");
+  writeTree(rootDir, {
+    "package.json": { type: "module" },
+    "doctor-contract-api.mjs": `import { readFileSync } from 'node:fs';
+      readFileSync(new URL('./missing-resource.json', import.meta.url));
+      export const stateMigrations = [];`,
+  });
+  const record = createPluginManifestRecordFixture({
+    id: "unavailable-plugin",
+    rootDir,
+    source: path.join(rootDir, "doctor-contract-api.mjs"),
+    origin: "config",
+    doctorContract: { stateMigrations: [{ id: "repair" }] },
+  });
+  const warnings: string[] = [];
+  await using cache = createPluginCache();
+  const collected = await withPluginCache(cache, () =>
+    collectPluginDoctorStateMigrationPlans(
+      { config: {}, env: {}, stateDir: rootDir, oauthDir: rootDir },
+      {
+        inventory: {
+          records: [record],
+          knownPluginIds: [record.id],
+          descriptors: [{ pluginId: record.id, id: "repair" }],
+          sessionStoreOwnerPluginIds: [],
+          unresolvedPluginIds: [],
+        },
+        plannedActions: [{ pluginId: record.id, id: "repair" }],
+        warnings,
+      },
+    ),
+  );
+  expect(collected.requiredPluginIds).toEqual(new Set([record.id]));
+  expect(collected.inspectedPluginIds.size).toBe(0);
+  expect(collected.statelessPluginIds.size).toBe(0);
+  expect(collected.plans).toEqual([]);
+  expect(warnings).toEqual([
+    expect.stringContaining("Plugin unavailable-plugin is not prepared: ENOENT"),
+  ]);
+});

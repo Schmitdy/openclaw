@@ -11,6 +11,35 @@ import {
 const canonicalFact = { path: "/media/canonical.png", contentType: "image/png" };
 
 describe("canonical persisted media", () => {
+  it("sanitizes malformed fields before classifying SVG without moving attachment slots", () => {
+    const malformed = [
+      null,
+      { path: 123 },
+      { url: true },
+      { contentType: { nope: true } },
+      { fileName: ["logo.svg"] },
+      { path: "/tmp/logo.svg", contentType: { nope: true }, kind: "image" },
+    ];
+    const original = JSON.stringify(malformed);
+    const facts = normalizeMediaFacts(
+      malformed as unknown as Parameters<typeof normalizeMediaFacts>[0],
+    );
+    expect(facts).toHaveLength(6);
+    for (const fact of facts.slice(0, 5)) {
+      expect(fact.path).toBeUndefined();
+      expect(fact.url).toBeUndefined();
+      expect(fact.contentType).toBeUndefined();
+      expect(fact.fileName).toBeUndefined();
+      expect(isImageMediaFact(fact)).toBe(false);
+    }
+    expect(facts[5]).toMatchObject({
+      path: "/tmp/logo.svg",
+      contentType: undefined,
+      kind: "document",
+    });
+    expect(JSON.stringify(malformed)).toBe(original);
+  });
+
   it.each([
     {
       name: "legacy-only",
@@ -315,12 +344,12 @@ describe("canonical image media facts", () => {
     {
       name: "explicit image-kind SVG",
       fact: { path: "/tmp/diagram.svg", kind: "image" as const },
-      expected: true,
+      expected: false,
     },
     {
       name: "explicit SVG image MIME",
       fact: { path: "/tmp/diagram.svg", contentType: "image/svg+xml" },
-      expected: true,
+      expected: false,
     },
     { name: "filename-only TIFF", fact: { path: "/tmp/scan.tiff" }, expected: true },
     {
@@ -350,6 +379,31 @@ describe("canonical image media facts", () => {
     },
   ])("classifies $name at the shared image-fact owner", ({ fact, expected }) => {
     expect(isImageMediaFact(fact)).toBe(expected);
+  });
+
+  it.each([
+    { path: "/tmp/opaque", contentType: "IMAGE/SVG+XML; charset=utf-8", kind: "image" as const },
+    { path: "/tmp/diagram.svg", contentType: "image", kind: "image" as const },
+    {
+      path: "/tmp/opaque",
+      fileName: "diagram.SVG",
+      contentType: "application/octet-stream",
+      kind: "image" as const,
+    },
+  ])("retains SVG file provenance while correcting stale image kind: %j", (svg) => {
+    const message = { __openclaw: { media: [svg, canonicalFact] } };
+    const original = JSON.stringify(message);
+    const media = readPersistedMediaFacts(message);
+    expect(media?.[0]).toMatchObject({ ...svg, kind: "document" });
+    expect(media?.[1]).toMatchObject({ ...canonicalFact, kind: "image" });
+    expect(media?.map(isImageMediaFact)).toEqual([false, true]);
+    expect(JSON.stringify(message)).toBe(original);
+  });
+
+  it("keeps authoritative PNG MIME and source ahead of a conflicting SVG filename", () => {
+    expect(isImageMediaFact({ path: "/tmp/diagram.svg", contentType: "image/png" })).toBe(true);
+    expect(isImageMediaFact({ path: "/tmp/photo.png", fileName: "diagram.svg" })).toBe(true);
+    expect(isImageMediaFact({ path: "/tmp/scan.tiff", fileName: "diagram.svg" })).toBe(true);
   });
 
   it("classifies video from separate filename metadata when its source is opaque", () => {
@@ -385,7 +439,7 @@ describe("canonical image media facts", () => {
       },
     });
 
-    expect(media?.map(isImageMediaFact)).toEqual([false, true, true]);
+    expect(media?.map(isImageMediaFact)).toEqual([false, true, false]);
     expect(media?.[1]?.kind).toBeUndefined();
   });
 });

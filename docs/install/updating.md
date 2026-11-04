@@ -88,6 +88,11 @@ registry. Unavailable replacements remain nonblocking: the app's recovery
 diagnostics include the remaining version or peer-link warning and the exact
 repair command. Retry Gateway setup in the app to repeat this owned repair.
 
+Doctor contract load failures, including missing files, retain the original cause
+and leave the plugin unprepared. They do not become an empty migration list or
+an immutable action-order mismatch. Successfully loaded contracts still require
+the declared action order, phase, and Doctor-only authority to match.
+
 ## Retired tenant-container management
 
 The experimental `openclaw fleet` command has been removed. Updating the host

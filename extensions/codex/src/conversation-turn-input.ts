@@ -1,12 +1,11 @@
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { isImageMediaFact } from "openclaw/plugin-sdk/media-mime";
 import type {
   PluginHookInboundClaimEvent,
   PluginHookMediaFact,
 } from "openclaw/plugin-sdk/plugin-entry";
 import type { CodexUserInput } from "./app-server/protocol.js";
-
-const IMAGE_EXTENSIONS = new Set([".avif", ".gif", ".jpeg", ".jpg", ".png", ".webp"]);
 
 export function buildCodexConversationTurnInput(params: {
   prompt: string;
@@ -21,7 +20,7 @@ export function buildCodexConversationTurnInput(params: {
 }
 
 function toCodexImageInput(media: PluginHookMediaFact): CodexUserInput | undefined {
-  if (!isImageMedia(media)) {
+  if (!isImageMediaFact(media)) {
     return undefined;
   }
   const localPath = media.path ?? readLocalMediaPath(media.url);
@@ -40,17 +39,6 @@ function toCodexImageInput(media: PluginHookMediaFact): CodexUserInput | undefin
     }
   }
   return media.url ? { type: "image", url: media.url } : undefined;
-}
-
-function isImageMedia(media: PluginHookMediaFact): boolean {
-  if (media.kind === "image" || media.contentType?.toLowerCase().startsWith("image/")) {
-    return true;
-  }
-  const candidate = media.path ?? media.url;
-  if (!candidate) {
-    return false;
-  }
-  return IMAGE_EXTENSIONS.has(path.extname(candidate.split(/[?#]/, 1)[0] ?? "").toLowerCase());
 }
 
 function readLocalMediaPath(value: string | undefined): string | undefined {

@@ -11,7 +11,7 @@ describe("persisted media image layout", () => {
     {
       name: "explicit image-kind SVG",
       media: { path: "/tmp/diagram.svg", kind: "image" as const },
-      image: true,
+      image: false,
     },
     {
       name: "separate image filename with opaque source",
