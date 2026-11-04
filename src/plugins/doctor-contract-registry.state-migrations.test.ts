@@ -153,6 +153,47 @@ function modernLegacyFixture(source = directDetector) {
 }
 
 describe("doctor-contract-registry state migrations", () => {
+  it.each(["load", "dependency-link"] as const)(
+    "reports a %s failure as unavailable without certifying inspection",
+    async (kind) => {
+      const { PluginDependencyLinkError } = await import("./plugin-instance-error.js");
+      const failure =
+        kind === "load"
+          ? Object.assign(new Error("ENOENT: fixture contract resource missing"), { code: "ENOENT" })
+          : new PluginDependencyLinkError("fixture dependency link unavailable");
+      mockModernPlugin({
+        doctorContract: { configRepair: true, stateMigrations: [{ id: "alpha-state" }] },
+      });
+      mocks.createJiti.mockImplementation(() => () => {
+        throw failure;
+      });
+      const unavailable = vi.fn();
+      const inspected = vi.fn();
+      const stateless = vi.fn();
+
+      expect(
+        migrationEntries({
+          onUnavailablePlugin: unavailable,
+          onInspectedPlugin: inspected,
+          onInspectedStatelessPlugin: stateless,
+        }),
+      ).toEqual([]);
+      expect(unavailable).toHaveBeenCalledTimes(1);
+      const reported = unavailable.mock.calls[0]?.[1];
+      expect(unavailable.mock.calls[0]?.[0]).toBe("alpha");
+      if (kind === "load") {
+        expect(reported).toBeInstanceOf(harness.registry.PluginDoctorContractLoadError);
+        expect(reported.cause).toBe(failure);
+        expect(reported.message).toBe(failure.message);
+      } else {
+        expect(reported).toBe(failure);
+      }
+      expect(inspected).not.toHaveBeenCalled();
+      expect(stateless).not.toHaveBeenCalled();
+      expect(harness.registry.listPluginDoctorLegacyConfigRules({ config: {}, env: {} })).toEqual([]);
+    },
+  );
+
   it("orders dynamic and declared owners while preserving each owner's action order", () => {
     const acpxRoot = makeTempDir();
     const codexRoot = makeTempDir();

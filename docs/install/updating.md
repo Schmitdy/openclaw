@@ -380,6 +380,10 @@ dependency directories. POSIX replacements are staged before publication;
 Windows removes only the junction or symlink before recreating and verifying it.
 A failed link leaves that plugin unprepared with a named error. Doctor retains
 its pending migration obligation while other plugins' migrations continue.
+Other contract load failures, including missing files, retain the original cause
+and leave the plugin unprepared. They do not become an empty migration list or
+an immutable action-order mismatch. Successfully loaded contracts still require
+the declared action order, phase, and Doctor-only authority to match.
 This repair applies when the candidate loads plugin contracts during Doctor.
 
 ### Migration integrity checks
