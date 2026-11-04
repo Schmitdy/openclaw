@@ -128,10 +128,22 @@ export function collectDoctorConfigRepairPluginIds(
   return [...ids].toSorted();
 }
 
+export class PluginDoctorContractLoadError extends Error {
+  override name = "PluginDoctorContractLoadError";
+
+  constructor(cause: unknown) {
+    super(formatErrorMessage(cause), { cause });
+  }
+}
+
+type PluginDoctorContractUnavailableError =
+  | PluginDependencyLinkError
+  | PluginDoctorContractLoadError;
+
 function loadPluginDoctorContractEntry(
   record: PluginManifestRegistryRecord,
   surface: PluginDoctorContractSurface,
-): PluginDoctorContractEntry | PluginDependencyLinkError | null {
+): PluginDoctorContractEntry | PluginDoctorContractUnavailableError | null {
   const declaration = record.doctorContract;
   // Declarations gate loading only; modules remain authoritative, while absence preserves loading.
   if (declaration && !declaresPluginDoctorContractSurface(declaration, surface)) {
@@ -163,7 +175,9 @@ function loadPluginDoctorContractEntry(
     log.warn(
       `failed to load doctor contract for ${record.id} from ${contractArtifact.modulePath}: ${formatErrorMessage(error)}`,
     );
-    return error instanceof PluginDependencyLinkError ? error : null;
+    return error instanceof PluginDependencyLinkError
+      ? error
+      : new PluginDoctorContractLoadError(error);
   }
 }
 
@@ -312,7 +326,11 @@ function loadPluginDoctorContractEntries(params: {
 }): PluginDoctorContractEntry[] {
   return params.records.flatMap((record) => {
     const entry = loadPluginDoctorContractEntry(record, params.surface);
-    return entry && !(entry instanceof PluginDependencyLinkError) ? [entry] : [];
+    return entry &&
+      !(entry instanceof PluginDependencyLinkError) &&
+      !(entry instanceof PluginDoctorContractLoadError)
+      ? [entry]
+      : [];
   });
 }
 export function listPluginDoctorLegacyConfigRules(
@@ -378,7 +396,7 @@ export function listPluginDoctorStateMigrationEntries(
     onSelectedPlugin?: (pluginId: string) => void;
     onInspectedPlugin?: (pluginId: string) => void;
     onInspectedStatelessPlugin?: (pluginId: string) => void;
-    onUnavailablePlugin?: (pluginId: string, error: PluginDependencyLinkError) => void;
+    onUnavailablePlugin?: (pluginId: string, error: PluginDoctorContractUnavailableError) => void;
   },
 ): PluginDoctorStateMigrationEntry[] {
   return loadPluginDoctorStateMigrationEntries(
@@ -397,13 +415,16 @@ function loadPluginDoctorStateMigrationEntries(
   onInspectedPlugin?: (pluginId: string) => void,
   onInspectedStatelessPlugin?: (pluginId: string) => void,
   onSelectedPlugin?: (pluginId: string) => void,
-  onUnavailablePlugin?: (pluginId: string, error: PluginDependencyLinkError) => void,
+  onUnavailablePlugin?: (pluginId: string, error: PluginDoctorContractUnavailableError) => void,
 ): PluginDoctorStateMigrationEntry[] {
   const entries: PluginDoctorStateMigrationEntry[] = [];
   for (const record of records) {
     onSelectedPlugin?.(record.id);
     const modern = loadPluginDoctorContractEntry(record, "stateMigrations");
-    if (modern instanceof PluginDependencyLinkError) {
+    if (
+      modern instanceof PluginDependencyLinkError ||
+      modern instanceof PluginDoctorContractLoadError
+    ) {
       onUnavailablePlugin?.(record.id, modern);
       continue;
     }
