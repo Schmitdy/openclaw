@@ -305,6 +305,7 @@ function isSvgMediaFact(fact: MediaFactInput): boolean {
   if (
     contentType &&
     !isGenericBinaryMediaContentType(contentType) &&
+    // SAFETY: membership accepts an arbitrary string; the cast does not narrow the returned value.
     !LEGACY_MEDIA_KINDS.has(contentType as MediaKind)
   ) {
     return contentType === "image/svg+xml";
