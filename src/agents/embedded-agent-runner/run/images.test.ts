@@ -75,6 +75,97 @@ describe("prompt image preparation", () => {
     expect(roots).not.toHaveBeenCalled();
   });
 
+  it.each(["inline", "offloaded"] as const)(
+    "replays stale SVG %s ownership as a file while preserving the PNG index",
+    async (kind) => {
+      const svgBytes = Buffer.from('<svg xmlns="http://www.w3.org/2000/svg"><path d="M0 0"/></svg>');
+      const workspaceDir = await imageWorkspace({ "logo.svg": svgBytes, "photo.png": undefined });
+      const svg = {
+        path: path.join(workspaceDir, "logo.svg"),
+        fileName: "logo.svg",
+        contentType: "image/svg+xml",
+        kind: "image" as const,
+      };
+      const png = {
+        path: path.join(workspaceDir, "photo.png"),
+        contentType: "image/png",
+        kind: "image" as const,
+      };
+      const message = {
+        role: "user" as const,
+        content: "Read the logo and photo",
+        timestamp: 0,
+        __openclaw: {
+          media: [svg, png],
+          mediaImageLayout: {
+            slots: [{ kind, factIndex: 0 }, { kind: "inline", factIndex: 1 }],
+          },
+        },
+      };
+      const originalMessage = JSON.stringify(message);
+      const result = await prepareEmbeddedAttemptPromptExecution({
+        attempt: {
+          workspaceDir,
+          model: { input: ["text", "image"] },
+          media: [svg, png],
+          images:
+            kind === "inline"
+              ? [
+                  { type: "image", mimeType: "image/svg+xml", data: svgBytes.toString("base64") },
+                  pngImage(),
+                ]
+              : [pngImage()],
+          userTurnTranscriptRecorder: {
+            message,
+            resolveMessage: async () => message,
+            getAdmissionReceipt: () => undefined,
+            markRuntimePersistencePending: vi.fn(),
+            markRuntimePersisted: vi.fn(),
+            markBlocked: vi.fn(),
+            hasPersisted: () => true,
+            isBlocked: () => false,
+            hasRuntimePersistencePending: () => false,
+            waitForRuntimePersistence: async () => {},
+            persistApproved: async () => undefined,
+            persistBlocked: async () => undefined,
+            persistFallback: async () => undefined,
+          },
+        },
+        mediaOwnerAgentId: "main",
+        effectiveFsWorkspaceOnly: true,
+        effectiveWorkspace: workspaceDir,
+        prompt: "Read the logo and photo",
+        skipPromptSubmission: false,
+        pluginHarness: true,
+      });
+      expect(result.images).toEqual([pngImage()]);
+      expect(result.imageFactIndexes).toEqual([1]);
+      expect(result.failedMediaCount).toBe(0);
+      expect(result.media).toEqual([expect.objectContaining({ ...svg, kind: "document" })]);
+      expect(await fs.readFile(svg.path)).toEqual(svgBytes);
+      expect(JSON.stringify(message)).toBe(originalMessage);
+    },
+  );
+
+  it("still rejects a real raster hydration failure in the native harness", async () => {
+    const workspaceDir = await imageWorkspace({ "broken.png": Buffer.from("not a PNG") });
+    await expect(
+      prepareEmbeddedAttemptPromptExecution({
+        attempt: {
+          workspaceDir,
+          model: { input: ["text", "image"] },
+          media: [{ path: path.join(workspaceDir, "broken.png"), contentType: "image/png" }],
+        },
+        mediaOwnerAgentId: "main",
+        effectiveFsWorkspaceOnly: true,
+        effectiveWorkspace: workspaceDir,
+        prompt: "Read this image",
+        skipPromptSubmission: false,
+        pluginHarness: true,
+      }),
+    ).rejects.toThrow("failed to hydrate 1 structured image attachment(s)");
+  });
+
   it("resolves roots once for several files and still rejects a file outside them", async () => {
     const workspaceDir = tempDirs.make("openclaw-prompt-images-");
     const deniedDir = tempDirs.make("openclaw-prompt-denied-");
@@ -328,6 +419,42 @@ describe("detectAndLoadPromptImages", () => {
     });
     expect(result.images).toEqual([kept]);
     expect(result.imageFactIndexes).toEqual([1]);
+  });
+
+  it.each([undefined, 0, 7])("keeps unresolved inline ownership fail-closed: %s", async (factIndex) => {
+    const result = await loadImages({
+      prompt: "Read the image",
+      workspaceDir: "/tmp",
+      media: [{}],
+      mediaImageLayout: { slots: [{ kind: "inline", factIndex }] },
+    });
+    expect(result.failedMediaCount).toBe(1);
+  });
+
+  it("retains inline PNG when its present fact has no known media kind", async () => {
+    const result = await loadImages({
+      prompt: "Read the image",
+      workspaceDir: "/tmp",
+      media: [{ path: "/tmp/opaque", contentType: "application/octet-stream" }],
+      existingImages: [pngImage()],
+      mediaImageLayout: { slots: [{ kind: "inline", factIndex: 0 }] },
+    });
+    expect(result.images).toEqual([pngImage()]);
+    expect(result.imageFactIndexes).toEqual([0]);
+    expect(result.failedMediaCount).toBe(0);
+  });
+
+  it("retains factless inline PNG alongside a stale SVG-owned block", async () => {
+    const result = await loadImages({
+      prompt: "Read the image",
+      workspaceDir: "/tmp",
+      media: [{ path: "/tmp/logo.svg", kind: "image", contentType: "image/svg+xml" }],
+      existingImages: [gifImage(), pngImage()],
+      mediaImageLayout: { slots: [{ kind: "inline", factIndex: 0 }, { kind: "inline" }] },
+    });
+    expect(result.images).toEqual([pngImage()]);
+    expect(result.imageFactIndexes).toEqual([null]);
+    expect(result.failedMediaCount).toBe(0);
   });
 
   it("classifies prompt and attachment refs while preserving mixed attachment order", async () => {

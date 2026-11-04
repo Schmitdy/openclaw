@@ -314,12 +314,12 @@ describe("canonical image media facts", () => {
     {
       name: "explicit image-kind SVG",
       fact: { path: "/tmp/diagram.svg", kind: "image" as const },
-      expected: true,
+      expected: false,
     },
     {
       name: "explicit SVG image MIME",
       fact: { path: "/tmp/diagram.svg", contentType: "image/svg+xml" },
-      expected: true,
+      expected: false,
     },
     { name: "filename-only TIFF", fact: { path: "/tmp/scan.tiff" }, expected: true },
     {
@@ -349,6 +349,31 @@ describe("canonical image media facts", () => {
     },
   ])("classifies $name at the shared image-fact owner", ({ fact, expected }) => {
     expect(isImageMediaFact(fact)).toBe(expected);
+  });
+
+  it.each([
+    { path: "/tmp/opaque", contentType: "IMAGE/SVG+XML; charset=utf-8", kind: "image" as const },
+    { path: "/tmp/diagram.svg", contentType: "image", kind: "image" as const },
+    {
+      path: "/tmp/opaque",
+      fileName: "diagram.SVG",
+      contentType: "application/octet-stream",
+      kind: "image" as const,
+    },
+  ])("retains SVG file provenance while correcting stale image kind: %j", (svg) => {
+    const message = { __openclaw: { media: [svg, canonicalFact] } };
+    const original = JSON.stringify(message);
+    const media = readPersistedMediaFacts(message);
+    expect(media?.[0]).toMatchObject({ ...svg, kind: "document" });
+    expect(media?.[1]).toMatchObject({ ...canonicalFact, kind: "image" });
+    expect(media?.map(isImageMediaFact)).toEqual([false, true]);
+    expect(JSON.stringify(message)).toBe(original);
+  });
+
+  it("keeps authoritative PNG MIME and source ahead of a conflicting SVG filename", () => {
+    expect(isImageMediaFact({ path: "/tmp/diagram.svg", contentType: "image/png" })).toBe(true);
+    expect(isImageMediaFact({ path: "/tmp/photo.png", fileName: "diagram.svg" })).toBe(true);
+    expect(isImageMediaFact({ path: "/tmp/scan.tiff", fileName: "diagram.svg" })).toBe(true);
   });
 
   it("classifies video from separate filename metadata when its source is opaque", () => {
@@ -384,7 +409,7 @@ describe("canonical image media facts", () => {
       },
     });
 
-    expect(media?.map(isImageMediaFact)).toEqual([false, true, true]);
+    expect(media?.map(isImageMediaFact)).toEqual([false, true, false]);
     expect(media?.[1]?.kind).toBeUndefined();
   });
 });

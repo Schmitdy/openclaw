@@ -295,8 +295,33 @@ function isGenericBinaryMediaContentType(contentType?: string | null): boolean {
   );
 }
 
+// SVG is retained as a file: native image inputs require raster hydration.
+function isSvgMediaFact(fact: MediaFactInput): boolean {
+  const contentType = normalizeMimeType(fact.contentType);
+  if (contentType && !isGenericBinaryMediaContentType(contentType) && !isMediaKind(contentType)) {
+    return contentType === "image/svg+xml";
+  }
+  if (!normalizeOptionalString(fact.path) && !normalizeOptionalString(fact.url)) {
+    return false;
+  }
+  for (const candidate of [fact.path, fact.url, fact.fileName]) {
+    const inferredMime = mimeTypeFromFilePath(candidate);
+    if (inferredMime) {
+      return inferredMime === "image/svg+xml";
+    }
+    const extension = getFileExtension(candidate);
+    if (extension === ".tif" || extension === ".tiff") {
+      return false;
+    }
+  }
+  return false;
+}
+
 /** Resolves attachment kind from authoritative facts before source or filename hints. */
 export function resolveMediaFactKind(fact: MediaFactInput): MediaKind | undefined {
+  if (isSvgMediaFact(fact)) {
+    return "document";
+  }
   if (fact.kind && fact.kind !== "unknown") {
     return fact.kind;
   }
@@ -316,8 +341,8 @@ export function resolveMediaFactKind(fact: MediaFactInput): MediaKind | undefine
   for (const candidate of [fact.path, fact.url, fact.fileName, source]) {
     const inferredMime = mimeTypeFromFilePath(candidate);
     if (inferredMime !== undefined) {
-      // A recognized source, including SVG, takes precedence over later filename hints.
-      return inferredMime === "image/svg+xml" ? undefined : kindFromMime(inferredMime);
+      // A recognized source takes precedence over later filename hints.
+      return kindFromMime(inferredMime);
     }
     const extension = getFileExtension(candidate);
     if (extension === ".tif" || extension === ".tiff") {
@@ -385,10 +410,11 @@ function normalizeMediaFact<TInput extends MediaFactInput>(
     path: normalizeOptionalString(input.path),
     url: normalizeOptionalString(input.url),
     contentType,
-    kind:
-      (typeof input.kind === "string" ? input.kind : undefined) ??
-      defaults.kind ??
-      (isGenericBinaryMediaContentType(contentType) ? undefined : kindFromMime(contentType)),
+    kind: isSvgMediaFact(input)
+      ? "document"
+      : ((typeof input.kind === "string" ? input.kind : undefined) ??
+        defaults.kind ??
+        (isGenericBinaryMediaContentType(contentType) ? undefined : kindFromMime(contentType))),
     fileName: normalizeOptionalString(input.fileName),
     ...(input.origin === "paste" || input.origin === "file" ? { origin: input.origin } : {}),
     sizeBytes: asFiniteNumberInRange(input.sizeBytes, { min: 0 }),

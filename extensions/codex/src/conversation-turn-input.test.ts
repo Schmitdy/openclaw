@@ -79,6 +79,18 @@ it.each([
   },
 );
 
+it.each([
+  "//cdn.test/photo.webp?token=abc",
+  "//cdn.test/photo.webp#preview",
+  "//cdn.test/photo.webp?token=abc#preview",
+])("preserves protocol-relative image URL query and fragment: %s", (url) => {
+  expectImages([{ url }], [remoteImage(url)]);
+});
+
+it("keeps protocol-relative SVG URLs as files with query and fragment", () => {
+  expectImages([{ url: "//cdn.test/logo.svg?token=abc#preview", kind: "image" }], []);
+});
+
 it.each(["path", "url"] as const)(
   "decodes mixed-case file URLs from %s for local images",
   (field) => {
@@ -99,5 +111,28 @@ it.skipIf(process.platform === "win32")("preserves POSIX backslash filenames in 
   expectImages(
     [{ url: "FiLe:///tmp/photo%5Cname.png", contentType: "image/png" }],
     [localImage("/tmp/photo\\name.png")],
+  );
+});
+
+it("keeps SVG files out of native image inputs without moving adjacent PNGs", () => {
+  expectImages(
+    [
+      {
+        path: "/tmp/logo.svg",
+        contentType: "image/svg+xml",
+        kind: "image",
+        fileName: "logo.svg",
+      },
+      png("/tmp/first.png"),
+      { path: "/tmp/old.svg", kind: "image" },
+      {
+        url: "https://example.test/opaque",
+        fileName: "wordmark.svg",
+        contentType: "application/octet-stream",
+        kind: "image",
+      },
+      png("/tmp/second.png"),
+    ],
+    [localImage("/tmp/first.png"), localImage("/tmp/second.png")],
   );
 });

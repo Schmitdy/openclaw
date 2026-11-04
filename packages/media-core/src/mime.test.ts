@@ -198,6 +198,16 @@ describe("mime detection", () => {
 
 describe("getFileExtension", () => {
   it.each([
+    ["//cdn.example.com/photo.webp?token=abc", ".webp"],
+    ["//cdn.example.com/photo.webp#preview", ".webp"],
+    ["//cdn.example.com/photo%2Ewebp?token=abc#preview", ".webp"],
+    ["//cdn.example.com/photo.webp%2Fpreview", ".webp%2fpreview"],
+    ["//cdn.example.com/photo.webp%5Cpreview", ".webp%5cpreview"],
+    ["//cdn.example.com/photo.webp/", undefined],
+    ["/tmp/photo.webp?token=abc", ".webp?token=abc"],
+    ["/tmp/photo.webp#preview", ".webp#preview"],
+    [String.raw`C:\media\photo.webp?token=abc`, ".webp?token=abc"],
+    [String.raw`C:\media\photo.webp#preview`, ".webp#preview"],
     ["https://cdn.example.com/render.mp4/", undefined],
     ["https://cdn.example.com/render.mp4%2Fpreview", ".mp4%2fpreview"],
     ["https://cdn.example.com/render.mp4%5Cpreview", ".mp4%5cpreview"],

@@ -196,12 +196,14 @@ async function sniffMime(buffer?: Buffer): Promise<string | undefined> {
   return buffer.toString("ascii", 0, 4) === "caff" ? "audio/x-caf" : undefined;
 }
 
-/** Extracts a lowercase extension from a local path or HTTP URL pathname. */
+/** Extracts a lowercase extension from a local path or HTTP(S)/protocol-relative URL pathname. */
 export function getFileExtension(filePath?: string | null): string | undefined {
   if (!filePath) {
     return undefined;
   }
-  const url = /^https?:\/\//i.test(filePath) ? URL.parse(filePath) : null;
+  const url = /^(?:https?:)?\/\//i.test(filePath)
+    ? URL.parse(filePath.startsWith("//") ? `https:${filePath}` : filePath)
+    : null;
   if (url) {
     let filename = url.pathname.slice(url.pathname.lastIndexOf("/") + 1);
     try {
