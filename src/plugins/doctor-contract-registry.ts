@@ -1,4 +1,5 @@
 import { AsyncLocalStorage } from "node:async_hooks";
+import fs from "node:fs";
 import path from "node:path";
 import { normalizeProviderId } from "@openclaw/model-catalog-core/provider-id";
 import { asNullableRecord } from "@openclaw/normalization-core/record-coerce";
@@ -8,11 +9,13 @@ import type { ProviderRename } from "../commands/doctor/shared/provider-rename.j
 import { GENERATED_BUNDLED_CHANNEL_CONFIG_METADATA } from "../config/bundled-channel-config-metadata.generated.js";
 import { discoverConfigWidePluginManifestRegistry } from "../config/io.plugin-metadata.js";
 import type { LegacyConfigRule } from "../config/legacy.shared.js";
+import { resolveStateDir } from "../config/paths.js";
 import type { OpenClawConfig } from "../config/types.js";
 import { formatErrorMessage } from "../infra/errors.js";
 import { createSubsystemLogger } from "../logging/subsystem.js";
 import { definePluginDoctorMigrationFromPlans } from "../plugin-sdk/doctor-migration-plan-adapter.js";
 import { withArtifactPreservingStateReads } from "../state/artifact-preserving-state-reads.js";
+import { getOpenClawDatabaseMaintenanceScope } from "../state/openclaw-state-db-async-lifecycle.js";
 import { areBundledPluginsDisabled } from "./bundled-dir.js";
 import { resolveBundledPluginScanDir } from "./bundled-plugin-scan.js";
 import { hasPluginConfigMigrationSource } from "./config-contract-matches.js";
@@ -39,15 +42,19 @@ import {
 } from "./doctor-contract-relevance.js";
 import type { PluginDoctorMigrationResourceCollectionParams } from "./doctor-migration-resources.js";
 import type { DoctorSessionRouteStateOwner } from "./doctor-session-route-state-owner-types.js";
+import { readPersistedInstalledPluginIndex } from "./installed-plugin-index-store.js";
 import { isActivatedManifestOwner } from "./manifest-owner-policy.js";
 import { loadBundledPluginManifestRegistry } from "./manifest-registry-build.js";
 import type { PluginManifestRegistry } from "./manifest-registry.types.js";
 import type { PluginManifestDoctorContract } from "./manifest-types.js";
+import { createPluginCache, withPluginCache } from "./plugin-cache.js";
 import { PluginDependencyLinkError } from "./plugin-instance-error.js";
+import { pluginNativeNamespaceCaptureIsCurrent } from "./plugin-native-namespace.js";
 import { normalizePluginPolicyId } from "./plugin-policy-id.js";
 import { loadPluginManifestRegistryForPluginRegistry } from "./plugin-registry.js";
 import { getPluginSetupModuleLoader } from "./plugin-setup-module.js";
 import { withPluginSourceCaptureStorage } from "./plugin-source-capture-context.js";
+import { pluginSourceStatIdentity } from "./plugin-source-file.js";
 import { loadBundledPluginPublicArtifactModuleFromCandidatesSync } from "./public-surface-loader.js";
 
 export { collectRelevantDoctorPluginIds } from "./doctor-contract-relevance.js";
@@ -537,6 +544,103 @@ function loadPluginDoctorStateMigrationEntries(
     });
   }
   return entries;
+}
+
+/** Inspect selected contract artifacts before stopping a serving Gateway. No plugin code runs here. */
+export async function preflightPluginDoctorStateMigrationContracts(params: {
+  config: OpenClawConfig;
+  env: NodeJS.ProcessEnv;
+}) {
+  const inspect = async () => {
+    await using cache = createPluginCache();
+    return await withPluginCache(cache, async () => {
+      const index = await readPersistedInstalledPluginIndex({
+        env: params.env,
+        stateDir: resolveStateDir(params.env),
+        artifactPreservingReadOnly: true,
+      });
+      const records = resolvePluginDoctorStateMigrationRecords({
+        ...params,
+        artifactPreservingReadOnly: true,
+      });
+      const canonical = (filename: string) => fs.realpathSync(filename);
+      const identities = records.map((record) => {
+        const rootDir = canonical(record.rootDir);
+        const source = record.source && canonical(record.source);
+        const installed = index?.plugins.find(
+          (entry) =>
+            entry.pluginId === record.id &&
+            canonical(entry.rootDir) === rootDir &&
+            (entry.source && canonical(entry.source)) === source,
+        );
+        const artifact = resolvePluginDoctorContractArtifact(record);
+        if (!artifact) {
+          if (declaresPluginDoctorContractSurface(record.doctorContract, "stateMigrations")) {
+            throw new Error(`Doctor contract artifact is missing for plugin ${record.id}.`);
+          }
+        } else {
+          const key = `${path.resolve(artifact.boundaryRoot)}\0${path.resolve(artifact.modulePath)}`;
+          const receipt = installed?.sourceAdmissions?.[key];
+          for (const fact of Object.values(receipt?.nativeNamespaces ?? {})) {
+            // A completely expired disposable capture is rebuilt by the existing capture owner.
+            // A retained reference or partially present immutable capture must never be reinterpreted.
+            if (
+              !fact.referenceRoot &&
+              !fs.lstatSync(fact.capturedRoot, { throwIfNoEntry: false })
+            ) {
+              continue;
+            }
+            if (!pluginNativeNamespaceCaptureIsCurrent(fact)) {
+              throw new Error(
+                `Captured Doctor contract bytes are incomplete or changed for plugin ${record.id}.`,
+              );
+            }
+          }
+        }
+        return {
+          pluginId: record.id,
+          rootDir,
+          source,
+          doctorContract: record.doctorContract,
+          schemaCacheKey: record.schemaCacheKey,
+          installRecordHash: installed?.installRecordHash,
+          artifact,
+          artifactIdentity: artifact
+            ? pluginSourceStatIdentity(fs.statSync(artifact.modulePath, { bigint: true }))
+            : undefined,
+        };
+      });
+      return { records, identities };
+    });
+  };
+  const before = await inspect();
+  return {
+    async prepare() {
+      const scope = getOpenClawDatabaseMaintenanceScope();
+      if (!scope) {
+        throw new Error("Doctor contract preparation requires admitted maintenance ownership.");
+      }
+      scope.assertOwnerCurrent();
+      const current = await inspect();
+      scope.assertOwnerCurrent();
+      if (JSON.stringify(current.identities) !== JSON.stringify(before.identities)) {
+        throw new Error(
+          "Selected Doctor contract identity changed before maintenance preparation.",
+        );
+      }
+      loadPluginDoctorStateMigrationEntries(
+        current.records,
+        true,
+        undefined,
+        undefined,
+        undefined,
+        (_pluginId, error) => {
+          throw error;
+        },
+      );
+      scope.assertOwnerCurrent();
+    },
+  };
 }
 
 export function resolvePluginDoctorStateMigrationRecords(

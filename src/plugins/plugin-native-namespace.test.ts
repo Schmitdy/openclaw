@@ -6,9 +6,11 @@ import { useAutoCleanupTempDirTracker } from "../../test/helpers/temp-dir.js";
 import {
   capturePluginNativeNamespace,
   finishPluginNativeNamespace,
+  pluginNativeNamespaceCaptureIsCurrent,
   pluginNativeNamespaceIsCurrent,
 } from "./plugin-native-namespace.js";
 import type { PluginNativeNamespaceFact } from "./plugin-source-admission.types.js";
+import * as pluginSourceFiles from "./plugin-source-file.js";
 
 const dirs = useAutoCleanupTempDirTracker(afterEach);
 afterEach(() => vi.restoreAllMocks());
@@ -145,4 +147,37 @@ it.each([
       mtimeNs: BigInt(modifiedAt.getTime()) * 1_000_000n,
     });
   }
+});
+
+it.each([false, true])(
+  "validates captured inventories without the installed source (reference=%s)",
+  (reference) => {
+    const fixture = namespaceFixture("fresh-copy");
+    const fact = fixture.finish();
+    if (reference) {
+      // A retained npm reference uses its admitted source paths, not capturedRoot/content.
+      fact.referenceRoot = fixture.sourceDirectory;
+      for (const member of Object.values(fact.members)) {
+        member.capturedIdentity = member.sourceIdentity;
+      }
+    } else {
+      fs.rmSync(fixture.sourceDirectory, { recursive: true });
+    }
+    expect(pluginNativeNamespaceCaptureIsCurrent(fact)).toBe(true);
+    fs.unlinkSync(reference ? fixture.sourceFile : fixture.capturedFile);
+    expect(pluginNativeNamespaceCaptureIsCurrent(fact)).toBe(false);
+  },
+);
+
+it("preserves the healthy namespace when a replacement copy runs out of space", () => {
+  const fixture = namespaceFixture("fresh-copy");
+  const previous = fixture.finish();
+  const before = structuredClone(previous);
+  vi.spyOn(pluginSourceFiles, "copyPluginSourceFile").mockImplementation(() => {
+    throw Object.assign(new Error("fixture capture is full"), { code: "ENOSPC" });
+  });
+  expect(() => fixture.capture("failed-replacement", previous)).toThrow("fixture capture is full");
+  expect(previous).toEqual(before);
+  expect(fs.readFileSync(fixture.previousFile)).toEqual(originalBytes);
+  expect(pluginNativeNamespaceCaptureIsCurrent(previous)).toBe(true);
 });

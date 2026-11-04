@@ -427,6 +427,22 @@ export async function beginDoctorMaintenance(params: DoctorMaintenanceParams) {
   });
   try {
     await settle(async () => {
+      const { createConfigIO } = await import("../config/io.js");
+      const { preflightPluginDoctorStateMigrationContracts } =
+        await import("../plugins/doctor-contract-registry.js");
+      const readPluginSelection = () =>
+        createConfigIO({
+          env: state.env,
+          observe: false,
+          pluginValidation: "core-only",
+          shellEnvFallback: "defer",
+        }).readConfigFileSnapshot();
+      const pluginSelection = await readPluginSelection();
+      const contracts = await preflightPluginDoctorStateMigrationContracts({
+        config: pluginSelection.config,
+        env: state.env,
+      });
+      assertCallerCurrent?.();
       const externallyManaged = isServiceRepairExternallyManaged(undefined, env);
       if (externallyManaged) {
         await preflightExternalDoctorAgentLease(env, waitForMaintenance);
@@ -615,6 +631,16 @@ export async function beginDoctorMaintenance(params: DoctorMaintenanceParams) {
       retainStoppedInstallation =
         stopped?.serviceUpdateVerdict?.kind === "owned" &&
         stopped.serviceUpdateVerdict.requiresInstallRootRefresh === true;
+      await state.run(async () => {
+        const currentSelection = await readPluginSelection();
+        if (
+          currentSelection.raw !== pluginSelection.raw ||
+          JSON.stringify(currentSelection.config) !== JSON.stringify(pluginSelection.config)
+        ) {
+          throw new Error("Doctor plugin selection changed before maintenance preparation.");
+        }
+        await contracts.prepare();
+      });
       await state.prepareRepair(assertDeadline);
     });
   } catch (error) {

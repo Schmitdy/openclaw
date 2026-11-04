@@ -385,6 +385,15 @@ and leave the plugin unprepared. They do not become an empty migration list or
 an immutable action-order mismatch. Successfully loaded contracts still require
 the declared action order, phase, and Doctor-only authority to match.
 This repair applies when the candidate loads plugin contracts during Doctor.
+Before stopping a managed Gateway, Doctor checks the selected migration contract
+artifacts and their persisted native capture inventories without executing plugin
+code. Missing retained companion files refuse repair while the Gateway is still
+serving. A first install has no old receipt to validate; wholly expired disposable
+captures remain rebuildable by the existing capture owner. After maintenance
+admission, Doctor rechecks the selected install identities and loads the selected
+contracts before preserving original state. Config changes, unavailable contracts,
+and actual declaration mismatches still refuse preparation. The candidate must
+contain this change; an older installed Doctor keeps its shipped behavior.
 
 ### Migration integrity checks
 

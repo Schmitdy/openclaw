@@ -197,13 +197,11 @@ function inspectDirectory(
   return members;
 }
 
-/** Both names and file identities must match: new, removed, and edited companions invalidate reuse. */
-export function pluginNativeNamespaceIsCurrent(
+/** Inspect retained bytes without admitting, copying, or publishing a new namespace. */
+export function pluginNativeNamespaceCaptureIsCurrent(
   fact: PluginNativeNamespaceFact,
-  boundary: string,
   outputRoot?: string,
 ): boolean {
-  const source = inspectDirectory(fact.sourceDirectory, boundary, outputRoot);
   const captured = inspectDirectory(
     pluginNativeNamespaceDirectory(fact),
     pluginNativeNamespaceBoundary(fact),
@@ -211,15 +209,26 @@ export function pluginNativeNamespaceIsCurrent(
     Boolean(fact.referenceRoot),
   );
   return (
+    captured.size === Object.keys(fact.members).length &&
+    [...captured].every(
+      ([relative, member]) => fact.members[relative]?.capturedIdentity === member.identity,
+    )
+  );
+}
+
+/** Both names and file identities must match: new, removed, and edited companions invalidate reuse. */
+export function pluginNativeNamespaceIsCurrent(
+  fact: PluginNativeNamespaceFact,
+  boundary: string,
+  outputRoot?: string,
+): boolean {
+  const source = inspectDirectory(fact.sourceDirectory, boundary, outputRoot);
+  return (
+    pluginNativeNamespaceCaptureIsCurrent(fact, outputRoot) &&
     source.size === Object.keys(fact.members).length &&
-    captured.size === source.size &&
     [...source].every(([relative, member]) => {
       const prior = fact.members[relative];
-      return (
-        prior?.source === member.source &&
-        prior.sourceIdentity === member.identity &&
-        prior.capturedIdentity === captured.get(relative)?.identity
-      );
+      return prior?.source === member.source && prior.sourceIdentity === member.identity;
     })
   );
 }
