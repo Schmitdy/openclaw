@@ -159,7 +159,9 @@ describe("doctor-contract-registry state migrations", () => {
       const { PluginDependencyLinkError } = await import("./plugin-instance-error.js");
       const failure =
         kind === "load"
-          ? Object.assign(new Error("ENOENT: fixture contract resource missing"), { code: "ENOENT" })
+          ? Object.assign(new Error("ENOENT: fixture contract resource missing"), {
+              code: "ENOENT",
+            })
           : new PluginDependencyLinkError("fixture dependency link unavailable");
       mockModernPlugin({
         doctorContract: { configRepair: true, stateMigrations: [{ id: "alpha-state" }] },
@@ -190,7 +192,9 @@ describe("doctor-contract-registry state migrations", () => {
       }
       expect(inspected).not.toHaveBeenCalled();
       expect(stateless).not.toHaveBeenCalled();
-      expect(harness.registry.listPluginDoctorLegacyConfigRules({ config: {}, env: {} })).toEqual([]);
+      expect(harness.registry.listPluginDoctorLegacyConfigRules({ config: {}, env: {} })).toEqual(
+        [],
+      );
     },
   );
 

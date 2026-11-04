@@ -153,7 +153,9 @@ export class PluginDoctorContractLoadError extends Error {
   }
 }
 
-type PluginDoctorContractUnavailableError = PluginDependencyLinkError | PluginDoctorContractLoadError;
+type PluginDoctorContractUnavailableError =
+  | PluginDependencyLinkError
+  | PluginDoctorContractLoadError;
 
 function loadPluginDoctorContractEntry(
   record: PluginManifestRegistryRecord,
@@ -200,7 +202,9 @@ function loadPluginDoctorContractEntry(
     log.warn(
       `failed to load doctor contract for ${record.id} from ${contractArtifact.modulePath}: ${formatErrorMessage(error)}`,
     );
-    return error instanceof PluginDependencyLinkError ? error : new PluginDoctorContractLoadError(error);
+    return error instanceof PluginDependencyLinkError
+      ? error
+      : new PluginDoctorContractLoadError(error);
   }
 }
 
