@@ -722,3 +722,57 @@ describe("hydratePromptMediaMessages", () => {
     }
   });
 });
+
+describe("persisted SVG prompt ownership", () => {
+  it.each(["inline", "offloaded"] as const)(
+    "drops stale SVG %s ownership without moving adjacent PNG",
+    async (kind) => {
+      const svg = { path: "/tmp/logo.svg", contentType: "image/svg+xml", kind: "image" as const };
+      const png = { path: "/tmp/photo.png", contentType: "image/png", kind: "image" as const };
+      const image = { type: "image" as const, data: TINY_PNG_BASE64, mimeType: "image/png" };
+      const message = {
+        role: "user" as const,
+        content: "Read files",
+        timestamp: 0,
+        __openclaw: {
+          media: [svg, png],
+          mediaImageLayout: {
+            slots: [
+              { kind, factIndex: 0 },
+              { kind: "inline" as const, factIndex: 1 },
+            ],
+          },
+        },
+      };
+      const original = JSON.stringify(message);
+      const result = await detectAndLoadPromptImages({
+        prompt: "Read files",
+        workspaceDir: "/tmp",
+        model: { input: ["text", "image"] },
+        userTurnTranscriptRecorder: { resolveMessage: async () => message },
+        existingImages:
+          kind === "inline"
+            ? [{ type: "image", data: "PHN2Zy8+", mimeType: "image/svg+xml" }, image]
+            : [image],
+      });
+      expect(result.images).toEqual([image]);
+      expect(result.imageFactIndexes).toEqual([1]);
+      expect(result.failedMediaCount).toBe(0);
+      expect(JSON.stringify(message)).toBe(original);
+    },
+  );
+  it("retains factless inline images next to a stale SVG-owned image", async () => {
+    const image = { type: "image" as const, data: TINY_PNG_BASE64, mimeType: "image/png" };
+    const result = await detectAndLoadPromptImages({
+      prompt: "Read files",
+      workspaceDir: "/tmp",
+      model: { input: ["text", "image"] },
+      media: [{ path: "/tmp/logo.svg", contentType: "image/svg+xml", kind: "image" }],
+      mediaImageLayout: { slots: [{ kind: "inline", factIndex: 0 }, { kind: "inline" }] },
+      existingImages: [{ type: "image", data: "PHN2Zy8+", mimeType: "image/svg+xml" }, image],
+    });
+    expect(result.images).toEqual([image]);
+    expect(result.imageFactIndexes).toEqual([null]);
+    expect(result.failedMediaCount).toBe(0);
+  });
+});

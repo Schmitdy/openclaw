@@ -163,3 +163,33 @@ describe("codex conversation turn input", () => {
     );
   });
 });
+
+describe("SVG attachment input", () => {
+  it("preserves adjacent PNGs while retaining SVGs as files", () => {
+    expectImages(
+      [
+        { path: "/tmp/logo.svg", contentType: "image/svg+xml", kind: "image" },
+        { path: "/tmp/first.png", contentType: "image/png" },
+        { path: "/tmp/old.svg", kind: "image" },
+        {
+          url: "https://example.test/wordmark.svg",
+          contentType: "application/octet-stream",
+          kind: "image",
+        },
+        { path: "/tmp/second.png", contentType: "image/png" },
+      ],
+      [
+        { type: "localImage", path: "/tmp/first.png" },
+        { type: "localImage", path: "/tmp/second.png" },
+      ],
+    );
+  });
+  it.each(["?token=abc", "#preview", "?token=abc#preview"])(
+    "retains protocol-relative query and fragment %s",
+    (suffix) => {
+      const url = "//cdn.test/photo.webp" + suffix;
+      expectImages([{ url }], [{ type: "image", url }]);
+      expectImages([{ url: "//cdn.test/logo.svg" + suffix, kind: "image" }], []);
+    },
+  );
+});
