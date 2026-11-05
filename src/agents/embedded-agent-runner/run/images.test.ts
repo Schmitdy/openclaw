@@ -759,8 +759,14 @@ describe("persisted SVG prompt ownership", () => {
       workspaceOnly: true,
     });
 
-    expect(replay[0]?.content).toEqual([historical.content[0], image]);
-    expect(replay[0]).toMatchObject({ __openclaw: { media: historical.__openclaw.media } });
+    const replayedHistory = replay[0];
+    expect(replayedHistory && "content" in replayedHistory && replayedHistory.content).toEqual([
+      historical.content[0],
+      image,
+    ]);
+    expect(replayedHistory).toMatchObject({
+      __openclaw: { media: historical["__openclaw"].media },
+    });
     expect(replay[1]).toBe(approval);
     expect(JSON.stringify(messages)).toBe(original);
   });
