@@ -293,9 +293,9 @@ describe("resolveAttachmentKind", () => {
     );
   });
 
-  it("preserves explicitly identified SVG images", () => {
+  it("keeps explicitly identified SVG attachments out of raster image analysis", () => {
     expect(
       resolveAttachmentKind({ path: "/tmp/diagram.svg", mime: "image/svg+xml", index: 0 }),
-    ).toBe("image");
+    ).toBe("unknown");
   });
 });

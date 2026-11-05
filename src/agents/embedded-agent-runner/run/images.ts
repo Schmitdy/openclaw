@@ -20,6 +20,7 @@ import {
   readRuntimePromptImageOrder,
   readRuntimePromptMediaFacts,
   readPersistedMediaFacts,
+  resolveMediaFactKind,
   type MediaFact,
 } from "../../../media/media-facts.js";
 import { resolveMediaReferenceLocalPath } from "../../../media/media-reference.js";
@@ -262,6 +263,13 @@ export async function detectAndLoadPromptImages(
     ...(mediaImageLayout?.suppressedFactIndexes ?? []),
     ...media.flatMap((fact, index) => (fact.hydrationSuppressed === true ? [index] : [])),
   ]);
+  const nonImageFactIndexes = new Set(
+    media.flatMap((fact, index) => {
+      const kind = resolveMediaFactKind(fact);
+      return kind && kind !== "unknown" && kind !== "image" && kind !== "sticker" ? [index] : [];
+    }),
+  );
+  const excludesFact = (index: number) => suppressed.has(index) || nonImageFactIndexes.has(index);
   const imageFactIndexes = media.flatMap((fact, factIndex) =>
     isImageMediaFact(fact) && !suppressed.has(factIndex) ? [factIndex] : [],
   );
@@ -296,7 +304,7 @@ export async function detectAndLoadPromptImages(
   })();
   const slots = mediaImageLayout?.slots.length
     ? mediaImageLayout.slots.filter(
-        (slot) => slot.factIndex === undefined || !suppressed.has(slot.factIndex),
+        (slot) => slot.factIndex === undefined || !excludesFact(slot.factIndex),
       )
     : inferredSlots;
   const layoutInlineIndexes = (mediaImageLayout?.slots ?? slots).flatMap((slot) =>
@@ -313,7 +321,7 @@ export async function detectAndLoadPromptImages(
       image,
       factIndex: existingIndexes?.[index] ?? null,
     }))
-    .filter((entry) => entry.factIndex === null || !suppressed.has(entry.factIndex));
+    .filter((entry) => entry.factIndex === null || !excludesFact(entry.factIndex));
   const takeExisting = (
     factIndex: number | undefined,
     allowUnowned: boolean,

@@ -722,3 +722,104 @@ describe("hydratePromptMediaMessages", () => {
     }
   });
 });
+
+describe("persisted SVG prompt ownership", () => {
+  it("replays historical Slack SVG attachments as files without rewriting the transcript", async () => {
+    const image = { type: "image" as const, data: TINY_PNG_BASE64, mimeType: "image/png" };
+    const historical = {
+      role: "user" as const,
+      timestamp: 1,
+      content: [
+        { type: "text" as const, text: "Compare the attached wordmarks and reference photo." },
+        { type: "image" as const, data: "PHN2Zy8+", mimeType: "image/svg+xml" },
+        image,
+      ],
+      __openclaw: {
+        media: [
+          { url: "https://files.slack.com/files-pri/T1-F1/wordmark.svg", kind: "image" },
+          { path: "/tmp/retained-wordmark.svg", contentType: "image/svg+xml", kind: "image" },
+          { path: "/tmp/reference.png", contentType: "image/png", kind: "image" },
+        ],
+        mediaImageLayout: {
+          slots: [
+            { kind: "inline", factIndex: 0 },
+            { kind: "offloaded", factIndex: 1 },
+            { kind: "inline", factIndex: 2 },
+          ],
+        },
+        mediaImageBlockFactIndexes: [0, 2],
+      },
+    };
+    const approval = { role: "user" as const, timestamp: 2, content: "Approved, please continue." };
+    const messages = [historical, approval];
+    const original = JSON.stringify(messages);
+    const replay = await hydratePromptMediaMessages(messages, {
+      workspaceDir: "/tmp",
+      model: { input: ["text", "image"] },
+      workspaceOnly: true,
+    });
+
+    const replayedHistory = replay[0];
+    expect(replayedHistory && "content" in replayedHistory && replayedHistory.content).toEqual([
+      historical.content[0],
+      image,
+    ]);
+    expect(replayedHistory).toMatchObject({
+      __openclaw: { media: historical["__openclaw"].media },
+    });
+    expect(replay[1]).toBe(approval);
+    expect(JSON.stringify(messages)).toBe(original);
+  });
+
+  it.each(["inline", "offloaded"] as const)(
+    "drops stale SVG %s ownership without moving adjacent PNG",
+    async (kind) => {
+      const svg = { path: "/tmp/logo.svg", contentType: "image/svg+xml", kind: "image" as const };
+      const png = { path: "/tmp/photo.png", contentType: "image/png", kind: "image" as const };
+      const image = { type: "image" as const, data: TINY_PNG_BASE64, mimeType: "image/png" };
+      const message = {
+        role: "user" as const,
+        content: "Read files",
+        timestamp: 0,
+        __openclaw: {
+          media: [svg, png],
+          mediaImageLayout: {
+            slots: [
+              { kind, factIndex: 0 },
+              { kind: "inline" as const, factIndex: 1 },
+            ],
+          },
+        },
+      };
+      const original = JSON.stringify(message);
+      const result = await detectAndLoadPromptImages({
+        prompt: "Read files",
+        workspaceDir: "/tmp",
+        model: { input: ["text", "image"] },
+        userTurnTranscriptRecorder: { resolveMessage: async () => message },
+        existingImages:
+          kind === "inline"
+            ? [{ type: "image", data: "PHN2Zy8+", mimeType: "image/svg+xml" }, image]
+            : [image],
+      });
+      expect(result.images).toEqual([image]);
+      expect(result.imageFactIndexes).toEqual([1]);
+      expect(result.failedMediaCount).toBe(0);
+      expect(JSON.stringify(message)).toBe(original);
+    },
+  );
+  it("retains factless inline images next to a stale SVG-owned image", async () => {
+    const image = { type: "image" as const, data: TINY_PNG_BASE64, mimeType: "image/png" };
+    const result = await detectAndLoadPromptImages({
+      prompt: "Read files",
+      workspaceDir: "/tmp",
+      model: { input: ["text", "image"] },
+      media: [{ path: "/tmp/logo.svg", contentType: "image/svg+xml", kind: "image" }],
+      mediaImageLayout: { slots: [{ kind: "inline", factIndex: 0 }, { kind: "inline" }] },
+      existingImages: [{ type: "image", data: "PHN2Zy8+", mimeType: "image/svg+xml" }, image],
+    });
+    expect(result.images).toEqual([image]);
+    expect(result.imageFactIndexes).toEqual([null]);
+    expect(result.failedMediaCount).toBe(0);
+  });
+});

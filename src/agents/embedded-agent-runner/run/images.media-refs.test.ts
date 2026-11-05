@@ -68,7 +68,7 @@ describe("fact-carried image references", () => {
   it("shares canonical SVG, TIFF, and document classification with embedded image refs", () => {
     expect(hasHydratableMediaImages([{ path: "/tmp/diagram.svg" }])).toBe(false);
     expect(hasHydratableMediaImages([{ path: "/tmp/diagram.svg", kind: "unknown" }])).toBe(false);
-    expect(hasHydratableMediaImages([{ path: "/tmp/diagram.svg", kind: "image" }])).toBe(true);
+    expect(hasHydratableMediaImages([{ path: "/tmp/diagram.svg", kind: "image" }])).toBe(false);
     expect(hasHydratableMediaImages([{ path: "/tmp/scan.tiff" }])).toBe(true);
     expect(
       hasHydratableMediaImages([
