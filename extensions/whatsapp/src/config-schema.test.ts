@@ -26,6 +26,16 @@ describe("whatsapp config schema", () => {
     });
   });
 
+  it("preserves exact group sender lists, including an explicit empty list", () => {
+    const groups = {
+      "120363401234567890@g.us": { allowFrom: ["+15550001111"], requireMention: true },
+      "120363401234567891@g.us": { allowFrom: [] },
+    };
+    expect(
+      WhatsAppConfigSchema.parse({ accounts: { work: { groups } } }).accounts?.work?.groups,
+    ).toEqual(groups);
+  });
+
   it("accepts historyLimit overrides per account", () => {
     expect(
       WhatsAppConfigSchema.parse({ historyLimit: 9, accounts: { work: { historyLimit: 4 } } }),

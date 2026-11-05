@@ -8,9 +8,10 @@ import {
 } from "./zod-schema.channel-messaging-common.js";
 import { ChannelDeliveryStreamingConfigSchema } from "./zod-schema.core.js";
 
-const WhatsAppGroupEntrySchema = buildGroupEntrySchema(undefined, {
-  omit: ["skills", "enabled", "allowFrom"],
-}).optional();
+const WhatsAppGroupEntrySchema = buildGroupEntrySchema(
+  { allowFrom: z.array(z.string()).optional() },
+  { omit: ["skills", "enabled"] },
+).optional();
 
 const WhatsAppDirectEntrySchema = z
   .strictObject({

@@ -11,6 +11,7 @@ import {
   setupAccessControlTestHarness,
   upsertPairingRequestMock,
 } from "./access-control.test-harness.js";
+import { resolveWhatsAppAdmissionChannelIngress } from "./admission.js";
 import { createTestWebInboundMessage } from "./test-message.test-helper.js";
 
 setupAccessControlTestHarness();
@@ -260,6 +261,57 @@ describe("checkInboundAccessControl admission contract", () => {
     expect(result.admission.sender.id).toBe(participantJid);
     expect(result.admission.sender).not.toHaveProperty("dmSenderId");
     expect(result.admission.conversation.kind).toBe("group");
+  });
+
+  it("replaces group senders for the exact group without granting command or DM access", async () => {
+    const groupJid = "120363401234567890@g.us";
+    const otherJid = "120363401234567891@g.us";
+    const owner = "+15550009999";
+    const member = "+15550001111";
+    const cfg = {
+      channels: {
+        whatsapp: {
+          accounts: {
+            work: {
+              dmPolicy: "allowlist",
+              allowFrom: [owner],
+              groupPolicy: "allowlist",
+              groupAllowFrom: [owner],
+              groups: {
+                [groupJid]: { allowFrom: [owner, member], requireMention: true },
+                [otherJid]: {},
+                "*": { allowFrom: ["*"] },
+              },
+            },
+          },
+        },
+      },
+    };
+    setAccessControlTestConfig(cfg);
+    const checkGroup = (remoteJid: string, senderE164 = member) =>
+      checkAccess({ accountId: "work", group: true, from: remoteJid, remoteJid, senderE164 });
+
+    const admitted = await checkGroup(groupJid);
+    expectAccepted(admitted);
+    const dispatched = await resolveWhatsAppAdmissionChannelIngress(admitted.admission, {
+      agentId: "main",
+      sessionKey: "agent:main:whatsapp:group:120363401234567890@g.us",
+      inboundEventKind: "user_request",
+    });
+    expect(dispatched?.senderAccess.allowed).toBe(true);
+    expect(await checkCommandAuthorizedForGroup({ cfg, from: groupJid })).toBe(false);
+    expect(await checkCommandAuthorizedForGroup({ cfg, from: groupJid, senderE164: owner })).toBe(
+      true,
+    );
+    expectSilentlyBlocked(await checkGroup(otherJid));
+    expectSilentlyBlocked(await checkGroup("120363401234567892@g.us"));
+    expectSilentlyBlocked(await checkGroup("invalid@g.us"));
+    expectSilentlyBlocked(await checkGroup(`telegram:group:${groupJid}`));
+    expectSilentlyBlocked(await checkAccess({ accountId: "work" }));
+    expectAccepted(await checkGroup(otherJid, owner));
+
+    cfg.channels.whatsapp.accounts.work.groups[groupJid].allowFrom = [];
+    expectSilentlyBlocked(await checkGroup(groupJid, owner));
   });
 
   it("does not authorize unresolved group participant JIDs as phone allowlist entries", async () => {
