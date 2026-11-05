@@ -293,6 +293,12 @@ Scope the opt-in to one account under `channels.whatsapp.accounts.<id>.pluginHoo
 
     If `groupAllowFrom` is unset, sender checks fall back to `allowFrom` when it has entries. Sender allowlists are evaluated before mention/reply activation.
 
+    With `groupPolicy: "allowlist"`, set `groups["<group-id>"].allowFrom` in the
+    effective group map to replace the sender list for that exact group. An
+    empty list blocks group senders there. An omitted list inherits the account
+    policy. Wildcard group entries cannot supply a sender override. This does
+    not change direct-message admission, mention rules or command ownership.
+
     If no `channels.whatsapp` block exists at all, runtime falls back to `groupPolicy: "allowlist"` (with a warning log), even if `channels.defaults.groupPolicy` is set to something else.
 
     <Note>
