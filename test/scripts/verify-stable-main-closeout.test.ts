@@ -619,21 +619,23 @@ describe("verify-stable-main-closeout", () => {
     }
   });
 
-  it("records a withdrawn 2026.9.6 macOS appcast from the main commit lookup", () => {
-    const version = "2026.9.6";
-    const mainSha = "a".repeat(40);
-    const fixture = closeoutFixture(
-      version,
-      false,
-      "<rss><sparkle:shortVersionString>2026.9.5</sparkle:shortVersionString></rss>",
-    );
-    const { dir, release, outputPath, originalPath } = fixture;
-    const bin = path.join(dir, "bin");
-    mkdirSync(bin);
-    writeFileSync(
-      path.join(bin, "gh"),
-      `#!/usr/bin/env node
-const expected = 'repos/openclaw/openclaw/commits?sha=${mainSha}&path=appcast.xml&per_page=100';
+  it.each(["openclaw/openclaw", "Schmitdy/openclaw"])(
+    "records a withdrawn 2026.9.6 macOS appcast from the main commit lookup in %s",
+    (repository) => {
+      const version = "2026.9.6";
+      const mainSha = "a".repeat(40);
+      const fixture = closeoutFixture(
+        version,
+        false,
+        "<rss><sparkle:shortVersionString>2026.9.5</sparkle:shortVersionString></rss>",
+      );
+      const { dir, release, outputPath, originalPath } = fixture;
+      const bin = path.join(dir, "bin");
+      mkdirSync(bin);
+      writeFileSync(
+        path.join(bin, "gh"),
+        `#!/usr/bin/env node
+const expected = 'repos/${repository}/commits?sha=${mainSha}&path=appcast.xml&per_page=100';
 if (process.argv[2] !== 'api' || process.argv[3] !== expected || process.env.WITHDRAWAL_LOOKUPS !== 'allowed') {
   throw new Error('Unexpected GitHub operation: ' + process.argv.slice(2).join(' '));
 }
@@ -642,34 +644,38 @@ process.stdout.write(JSON.stringify([
   { sha: 'c'.repeat(40), commit: { message: 'chore(release): withdraw the ${version} macOS build from the Sparkle feed\\n\\nRefs #156861\\n' } },
 ]));
 `,
-      { mode: 0o755 },
-    );
-    release.assets = ["", "-arm64", "-x86_64"]
-      .flatMap((suffix) =>
-        ["zip", "dmg", "dSYM.zip"].map((extension) => `OpenClaw-${version}${suffix}.${extension}`),
-      )
-      .map((name) => ({ name, digest: `sha256:${"c".repeat(64)}` }));
-    const run = (lookups: "allowed" | "forbidden", ...extra: string[]) =>
-      fixture.run(extra, {
-        ...process.env,
-        PATH: `${bin}:${process.env.PATH}`,
-        WITHDRAWAL_LOOKUPS: lookups,
-      });
+        { mode: 0o755 },
+      );
+      release.assets = ["", "-arm64", "-x86_64"]
+        .flatMap((suffix) =>
+          ["zip", "dmg", "dSYM.zip"].map(
+            (extension) => `OpenClaw-${version}${suffix}.${extension}`,
+          ),
+        )
+        .map((name) => ({ name, digest: `sha256:${"c".repeat(64)}` }));
+      const run = (lookups: "allowed" | "forbidden", ...extra: string[]) =>
+        fixture.run(extra, {
+          ...process.env,
+          GITHUB_REPOSITORY: repository,
+          PATH: `${bin}:${process.env.PATH}`,
+          WITHDRAWAL_LOOKUPS: lookups,
+        });
 
-    const initial = run("allowed");
-    expect(initial.status, initial.stderr).toBe(0);
-    const initialBytes = readFileSync(outputPath, "utf8");
-    expect(JSON.parse(initialBytes)).toMatchObject({
-      apps: "pending",
-      appPlatforms: { macos: "withdrawn" },
-      appcast: "withdrawn",
-      appcastWithdrawal: { commit: "c".repeat(40), reason: "Refs #156861" },
-    });
-    writeFileSync(originalPath, initialBytes);
-    const replay = run("forbidden", "--existing-manifest", originalPath);
-    expect(replay.status, replay.stderr).toBe(0);
-    expect(readFileSync(outputPath, "utf8")).toBe(initialBytes);
-  });
+      const initial = run("allowed");
+      expect(initial.status, initial.stderr).toBe(0);
+      const initialBytes = readFileSync(outputPath, "utf8");
+      expect(JSON.parse(initialBytes)).toMatchObject({
+        apps: "pending",
+        appPlatforms: { macos: "withdrawn" },
+        appcast: "withdrawn",
+        appcastWithdrawal: { commit: "c".repeat(40), reason: "Refs #156861" },
+      });
+      writeFileSync(originalPath, initialBytes);
+      const replay = run("forbidden", "--existing-manifest", originalPath);
+      expect(replay.status, replay.stderr).toBe(0);
+      expect(readFileSync(outputPath, "utf8")).toBe(initialBytes);
+    },
+  );
 });
 
 describe("stable closeout workflow keyed runs and tag-only replay", () => {

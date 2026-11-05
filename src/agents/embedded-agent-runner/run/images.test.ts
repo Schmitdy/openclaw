@@ -724,6 +724,47 @@ describe("hydratePromptMediaMessages", () => {
 });
 
 describe("persisted SVG prompt ownership", () => {
+  it("replays historical Slack SVG attachments as files without rewriting the transcript", async () => {
+    const image = { type: "image" as const, data: TINY_PNG_BASE64, mimeType: "image/png" };
+    const historical = {
+      role: "user" as const,
+      timestamp: 1,
+      content: [
+        { type: "text" as const, text: "Compare the attached wordmarks and reference photo." },
+        { type: "image" as const, data: "PHN2Zy8+", mimeType: "image/svg+xml" },
+        image,
+      ],
+      __openclaw: {
+        media: [
+          { url: "https://files.slack.com/files-pri/T1-F1/wordmark.svg", kind: "image" },
+          { path: "/tmp/retained-wordmark.svg", contentType: "image/svg+xml", kind: "image" },
+          { path: "/tmp/reference.png", contentType: "image/png", kind: "image" },
+        ],
+        mediaImageLayout: {
+          slots: [
+            { kind: "inline", factIndex: 0 },
+            { kind: "offloaded", factIndex: 1 },
+            { kind: "inline", factIndex: 2 },
+          ],
+        },
+        mediaImageBlockFactIndexes: [0, 2],
+      },
+    };
+    const approval = { role: "user" as const, timestamp: 2, content: "Approved, please continue." };
+    const messages = [historical, approval];
+    const original = JSON.stringify(messages);
+    const replay = await hydratePromptMediaMessages(messages, {
+      workspaceDir: "/tmp",
+      model: { input: ["text", "image"] },
+      workspaceOnly: true,
+    });
+
+    expect(replay[0]?.content).toEqual([historical.content[0], image]);
+    expect(replay[0]).toMatchObject({ __openclaw: { media: historical.__openclaw.media } });
+    expect(replay[1]).toBe(approval);
+    expect(JSON.stringify(messages)).toBe(original);
+  });
+
   it.each(["inline", "offloaded"] as const)(
     "drops stale SVG %s ownership without moving adjacent PNG",
     async (kind) => {
