@@ -514,7 +514,17 @@ export const msteamsPlugin: ChannelPlugin<ResolvedMSTeamsAccount, ProbeMSTeamsRe
               threadRootId,
             };
             if (action === "read") {
-              const message = await runtime.getMessageMSTeams(params);
+              const threadId = normalizeOptionalString(ctx.params.threadId);
+              if (ctx.params.threadId !== undefined && !threadId) {
+                return actionError("Read threadId must be a non-empty string.");
+              }
+              if (threadId && threadId !== messageId) {
+                return actionError("Read threadId must match the root messageId.");
+              }
+              const message = await runtime.getMessageMSTeams({
+                ...params,
+                ...(threadId ? { threadId } : {}),
+              });
               return jsonMSTeamsOkActionResult(action, { message });
             }
             if (action === "pin") {

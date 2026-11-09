@@ -2,6 +2,7 @@ import { DEFAULT_ACCOUNT_ID, normalizeAccountId } from "openclaw/plugin-sdk/acco
 import type { OpenClawConfig } from "../runtime-api.js";
 import { resolveDefaultMSTeamsAccountId } from "./accounts.js";
 import { createMSTeamsConversationStoreState } from "./conversation-store-state.js";
+import { readChannelMessageThread } from "./graph-message-thread.js";
 import {
   stripHtmlFromTeamsMessage,
   type GraphThreadMessage as GraphMessage,
@@ -98,6 +99,8 @@ type MSTeamsMessageTarget = {
   messageId: string;
   /** Thread root of a channel reply; Graph addresses replies only beneath it. */
   threadRootId?: string;
+  /** Explicit complete channel-thread read; must match messageId. */
+  threadId?: string;
 };
 
 export async function resolveGraphMessageContext(
@@ -139,7 +142,16 @@ function resolveMessagePath(
 }
 
 export async function getMessageMSTeams(params: MSTeamsMessageTarget) {
+  if (params.threadId !== undefined && params.threadId !== params.messageId) {
+    throw new Error("MS Teams threadId must match the root messageId.");
+  }
   const { token, ...conv } = await resolveGraphMessageContext(params);
+  if (params.threadId !== undefined) {
+    if (conv.kind !== "channel") {
+      throw new Error("MS Teams complete thread reads require a teamId/channelId target.");
+    }
+    return readChannelMessageThread({ token, basePath: conv.basePath, rootId: params.threadId });
+  }
   const path = resolveMessagePath(conv, params);
   const msg = await fetchGraphJson<GraphMessage>({ token, path });
   return {
