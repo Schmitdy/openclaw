@@ -99,7 +99,10 @@ describe("shared Control UI links", () => {
     "retains explicitly configured network origins: %s",
     (publicOrigin) => {
       expect(
-        resolveControlUiAutomationRunUrl({ gateway: { publicOrigin } }, { jobId: "daily-reminder" }),
+        resolveControlUiAutomationRunUrl(
+          { gateway: { publicOrigin } },
+          { jobId: "daily-reminder" },
+        ),
       ).toBe(`${publicOrigin}/automations?job=daily-reminder`);
     },
   );
