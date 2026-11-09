@@ -1,11 +1,13 @@
 import { describe, expect, it } from "vitest";
 import {
   resolveControlUiAutomationRunUrl,
-  resolveControlUiSessionLinkBase,
   resolveControlUiPublicSessionUrl,
+  resolveControlUiSessionLinkBase,
+  resolveControlUiSessionUrl,
 } from "./control-ui-link-base.js";
 
-const origin = "http://127.0.0.1:18789";
+const origin = "https://gateway.example.com";
+const maxBasePathLength = 200 - origin.length - 1;
 const linkBase = (controlUi: { enabled?: boolean; basePath?: string }) =>
   resolveControlUiSessionLinkBase({ gateway: { publicOrigin: origin, controlUi } });
 
@@ -13,8 +15,12 @@ describe("resolveControlUiSessionLinkBase", () => {
   it.each([
     ["disabled", { enabled: false }, undefined],
     ["normalized", { basePath: " /control/// " }, `${origin}/control`],
-    ["under the cap", { basePath: `/${"a".repeat(176)}` }, `${origin}/${"a".repeat(176)}`],
-    ["over the cap", { basePath: `/${"a".repeat(178)}` }, undefined],
+    [
+      "under the cap",
+      { basePath: `/${"a".repeat(maxBasePathLength)}` },
+      `${origin}/${"a".repeat(maxBasePathLength)}`,
+    ],
+    ["over the cap", { basePath: `/${"a".repeat(maxBasePathLength + 1)}` }, undefined],
   ] as const)("handles %s Control UI bases", (_name, config, expected) => {
     expect(linkBase(config)).toBe(expected);
   });
@@ -72,4 +78,29 @@ describe("resolveControlUiPublicSessionUrl", () => {
       resolveControlUiPublicSessionUrl(config, { ...session, entry: current }),
     ).toBeUndefined();
   });
+});
+
+describe("shared Control UI links", () => {
+  it.each([
+    "http://127.0.0.1:18789",
+    "http://127.0.0.2:18789",
+    "http://localhost:18789",
+    "http://localhost.:18789",
+    "http://[::1]:18789",
+    "http://[::ffff:127.0.0.1]:18789",
+  ])("omits device-local inspection and session links for %s", (publicOrigin) => {
+    const config = { gateway: { publicOrigin } };
+    expect(resolveControlUiAutomationRunUrl(config, { jobId: "daily-reminder" })).toBeUndefined();
+    expect(resolveControlUiSessionLinkBase(config)).toBeUndefined();
+    expect(resolveControlUiSessionUrl(config, { sessionKey: "agent:main:main" })).toBeUndefined();
+  });
+
+  it.each(["http://192.168.1.10:18789", "https://gateway.example.ts.net"])(
+    "retains explicitly configured network origins: %s",
+    (publicOrigin) => {
+      expect(
+        resolveControlUiAutomationRunUrl({ gateway: { publicOrigin } }, { jobId: "daily-reminder" }),
+      ).toBe(`${publicOrigin}/automations?job=daily-reminder`);
+    },
+  );
 });
