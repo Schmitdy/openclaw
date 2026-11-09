@@ -27,8 +27,11 @@ response is lost or times out, delivery stays **Unknown**; the transport does no
 retry that ambiguous send. Required delivery also leaves completion unknown,
 while best-effort delivery can complete successfully without claiming delivery.
 
-When `gateway.publicOrigin` is configured and the Control UI is enabled, chat
-notifications include an `Inspect` link into the Control UI. Command and script
+When `gateway.publicOrigin` is configured to a non-loopback origin and the Control UI
+is enabled, chat notifications include an `Inspect` link into the Control UI.
+Loopback origins such as `localhost`, `127.0.0.1`, and `[::1]` omit the link
+because they point to the recipient's device, not the Gateway. The notification
+text and schedule are unchanged. Command and script
 completion announcements open the automation run; isolated agent announcements
 open the run's session. Telegram and Discord show a compact **Inspect run**
 link instead of the full URL; other channels retain the plain `Inspect: <URL>`

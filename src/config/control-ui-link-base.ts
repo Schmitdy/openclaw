@@ -1,7 +1,9 @@
+import { isLoopbackIpAddress } from "@openclaw/net-policy/ip";
 import {
   buildControlUiSessionPath,
   normalizeControlUiBasePath,
 } from "@openclaw/session-url-contract";
+import { parseHostForAddressChecks } from "../../packages/gateway-client/src/client-address-utils.js";
 import { isIncognitoSessionKey } from "../shared/incognito-session-key.js";
 import { resolveGatewayPublicOrigin } from "./gateway-public-origin.js";
 import { resolveSessionPublicShare } from "./sessions/session-public-share.js";
@@ -18,6 +20,11 @@ export function resolveControlUiLinkLocation(
   }
   const origin = resolveGatewayPublicOrigin(cfg);
   if (!origin) {
+    return undefined;
+  }
+  // Shared chat links must not point recipients back at their own device.
+  const host = parseHostForAddressChecks(new URL(origin).hostname);
+  if (host && (host.isLocalhost || isLoopbackIpAddress(host.unbracketedHost))) {
     return undefined;
   }
   return {
