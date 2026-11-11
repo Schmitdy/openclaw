@@ -133,6 +133,19 @@ describe("native Teams read action with complete channel threads", () => {
     expect(result).toHaveProperty("messages.length", 52);
   });
 
+  it.each([
+    nextLink.replace("19%3Achannel%40thread.tacv2", channelId),
+    nextLink.replace("%3A", "%3a"),
+  ])("accepts equivalent channel encoding in a Graph continuation: %s", async (continuation) => {
+    pages({ value: [], "@odata.nextLink": continuation }, { value: [message("reply")] });
+    await expect(getMessageMSTeams(target)).resolves.toMatchObject({
+      complete: true,
+      pageCount: 2,
+      messages: [{ id: "root" }, { id: "reply" }],
+    });
+    expect(graph.fetch.mock.calls[2]![0].path).toBe(`${repliesPath}?$skiptoken=page-2`);
+  });
+
   it("preserves attachment-only answers and deletion metadata without claiming content inspection", async () => {
     const attachment = { ...message("attachment"), body: { content: "", contentType: "text" } };
     const deleted = {
@@ -212,6 +225,8 @@ describe("complete thread traversal failure controls", () => {
     ["other channel", nextLink.replace("19%3Achannel%40thread.tacv2", "other-channel")],
     ["other root", nextLink.replace("/root/", "/other/")],
     ["other collection", nextLink.replace("/replies?", "?")],
+    ["encoded channel separator", nextLink.replace("/channels/", "/channels%2F")],
+    ["encoded root separator", nextLink.replace("/root/replies", "/root%2Freplies")],
     ["credential URL", nextLink.replace("https://", "https://user:password@")],
     ["fragment", `${nextLink}#fragment`],
     ["malformed", "not a URL"],

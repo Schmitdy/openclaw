@@ -35,6 +35,7 @@ export async function readChannelMessageThread(params: {
   const rootPath = `${params.basePath}/messages/${encodeURIComponent(params.rootId)}`;
   const repliesPath = `${rootPath}/replies`;
   const collection = new URL(`${GRAPH_ROOT}${repliesPath}`);
+  const collectionSegments = collection.pathname.split("/").map(decodeURIComponent);
   const deadline = createProviderOperationDeadline({
     label: "MS Teams complete thread read",
     timeoutMs: MSTEAMS_REQUEST_TIMEOUT_MS,
@@ -148,7 +149,10 @@ export async function readChannelMessageThread(params: {
     if (
       continuation.protocol !== "https:" ||
       continuation.origin !== collection.origin ||
-      continuation.pathname !== collection.pathname ||
+      !isDeepStrictEqual(
+        continuation.pathname.split("/").map(decodeURIComponent),
+        collectionSegments,
+      ) ||
       continuation.username ||
       continuation.password ||
       continuation.hash
