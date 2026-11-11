@@ -1,9 +1,13 @@
 // Runs guard entry points without credentials or network access. Every API read
 // must have an explicit fixture; writes are recorded for contract assertions.
 import { appendFileSync, readFileSync } from "node:fs";
+import { loadSecurityReviewPolicy } from "../../scripts/github/security-review-policy.mjs";
 import { installGuardClock } from "./github-guard-clock.mjs";
 
 const fixture = JSON.parse(readFileSync(process.env.OPENCLAW_GUARD_TEST_FIXTURE, "utf8"));
+if (fixture.rolloutPullRequest !== undefined) {
+  loadSecurityReviewPolicy().rolloutPullRequest = fixture.rolloutPullRequest;
+}
 const advanceClock = fixture.clock ? installGuardClock(fixture.logPath) : undefined;
 const publishedStatuses = new Map();
 const publishedComments = new Map();

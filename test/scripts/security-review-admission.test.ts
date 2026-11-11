@@ -1,5 +1,15 @@
-import { expect, it } from "vitest";
+import { afterEach, beforeEach, expect, it } from "vitest";
 import { revalidatePublishedSecurityClearance } from "../../scripts/github/guard-review.mjs";
+import { loadSecurityReviewPolicy } from "../../scripts/github/security-review-policy.mjs";
+
+const policy = loadSecurityReviewPolicy();
+const authoredRolloutPullRequest = policy.rolloutPullRequest;
+beforeEach(() => {
+  policy.rolloutPullRequest = 152415;
+});
+afterEach(() => {
+  policy.rolloutPullRequest = authoredRolloutPullRequest;
+});
 
 const head = "a".repeat(40);
 const rolloutCommit = "b".repeat(40);
