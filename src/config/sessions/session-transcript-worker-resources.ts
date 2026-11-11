@@ -1,3 +1,4 @@
+import { addAbortListener } from "node:events";
 import path from "node:path";
 import { err, ok, type Result } from "@openclaw/normalization-core/result";
 import { joinOwnedWorkerTasks } from "@openclaw/worker-runtime";
@@ -11,6 +12,7 @@ import type {
 import { runWithSqliteDatabaseAdmissionTurn } from "../../infra/sqlite-database-admission-turn.js";
 import { SESSION_TRANSCRIPT_FOREGROUND_WORKERS } from "../../infra/worker-pool-sizing.js";
 import { WorkerTaskError, type WorkerTaskPool } from "../../infra/worker-task-pool.js";
+import { getGatewayShutdownCleanupSignal } from "../../process/gateway-work-admission.js";
 import { normalizeAgentId } from "../../routing/session-key.js";
 import { runInDetachedAsyncContext } from "../../shared/detached-async-context.js";
 import type { OpenClawAgentDatabaseOptions } from "../../state/openclaw-agent-db-contract.js";
@@ -235,6 +237,8 @@ export function rotateDatabaseWorkers(lane: SessionDatabaseWorkerLane): Promise<
 }
 
 export function clearDatabaseWorkerIdleRetirement(lane: SessionDatabaseWorkerLane): void {
+  lane.idleCleanupListener?.[Symbol.dispose]();
+  lane.idleCleanupListener = undefined;
   historyClearTimeout(lane.idleTimer);
   lane.idleTimer = undefined;
 }
@@ -250,10 +254,17 @@ export function armDatabaseWorkerIdleRetirement(lane: SessionDatabaseWorkerLane)
   if (lane.idleTimer) {
     return;
   }
+  const cleanupSignal = getGatewayShutdownCleanupSignal();
+  // Accepted reads keep their lane until settlement; then shutdown needs no warm retention.
+  if (cleanupSignal.aborted) {
+    retireIdleDatabaseWorkers();
+    return;
+  }
+  lane.idleCleanupListener = addAbortListener(cleanupSignal, retireIdleDatabaseWorkers);
   const idleMs = lane === historyLane || lane === transcriptSearchLane ? 5 * 60_000 : 90_000;
   lane.idleTimer = runInDetachedAsyncContext(() =>
     historySetTimeout(() => {
-      lane.idleTimer = undefined;
+      clearDatabaseWorkerIdleRetirement(lane);
       void rotateDatabaseWorkers(lane).catch((error: unknown) => {
         process.emitWarning(`${lane.name} worker retirement failed: ${String(error)}`);
       });

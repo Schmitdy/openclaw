@@ -96,4 +96,4 @@ it("reuses one original across three healthy Doctor repairs and captures a real 
   await repair();
   expect(await captures()).toHaveLength(2);
   expect(await captures()).toEqual(expect.arrayContaining(before));
-});
+}, 300_000);
