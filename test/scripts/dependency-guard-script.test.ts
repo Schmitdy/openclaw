@@ -139,6 +139,7 @@ function runDependencyGuard(
     fixturePath,
     JSON.stringify({
       logPath,
+      rolloutPullRequest: 152415,
       routes: {
         [`GET ${pullPath}`]: pullRequest,
         [`GET ${statusPath}`]: [],
