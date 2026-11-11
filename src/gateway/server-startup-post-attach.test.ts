@@ -91,6 +91,7 @@ const publishedPostReadySidecars = new Set<SidecarHandle>();
 const transferredSidecars = new Set<SidecarHandle>();
 const startupModuleRestorers: Array<() => void> = [];
 let testState: OpenClawTestState;
+let fixtureStartupWork: AsyncWorkScope;
 
 function adoptSidecars(target: Set<SidecarHandle>, sidecars: ReadonlyArray<SidecarHandle>): void {
   for (const sidecar of sidecars) {
@@ -185,6 +186,8 @@ async function cleanupGatewayTestState(): Promise<void> {
     transferBeforeStop(sidecar);
     await cleanup(() => sidecar.stop());
   }
+
+  await cleanup(() => fixtureStartupWork.drain());
 
   publishedConnectionDependentSidecars.clear();
   publishedGatewayLifetimeSidecars.clear();
@@ -287,6 +290,7 @@ function firstGatewayStartCall(
 describe("startGatewayPostAttachRuntime", () => {
   beforeEach(async () => {
     resetGatewayWorkAdmission();
+    fixtureStartupWork = new AsyncWorkScope();
     closeOpenClawStateDatabaseForTest();
     testState = await createOpenClawTestState({ label: "gateway-post-attach" });
     vi.stubEnv("OPENCLAW_SKIP_CHANNELS", "0");
@@ -344,6 +348,41 @@ describe("startGatewayPostAttachRuntime", () => {
         restore();
       }
     }
+  });
+
+  it("joins fixture startup producers before resetting state and recovery mocks", async ({
+    signal,
+  }) => {
+    const entered = createDeferred();
+    const release = createDeferred();
+    const resumed = vi.fn();
+    const runtime = await startGatewayPostAttachRuntime(
+      createPostAttachParams({
+        waitForPostReadyWork: async () => {
+          entered.resolve();
+          await release.promise;
+          resumed(fs.existsSync(testState.root));
+        },
+      }),
+    );
+    let cleaned = false;
+    let cleaning: Promise<void> | undefined;
+    try {
+      await withinTest(entered.promise, signal);
+      cleaning = cleanupGatewayTestState().then(() => {
+        cleaned = true;
+      });
+      await nextEventLoopTurn();
+      expect(cleaned).toBe(false);
+      expect(fs.existsSync(testState.root)).toBe(true);
+      expect(resumed).not.toHaveBeenCalled();
+    } finally {
+      release.resolve();
+      await Promise.all([runtime.subagentRecoverySettled, cleaning]);
+    }
+    expect(resumed).toHaveBeenCalled();
+    expect(resumed.mock.calls.every(([stateExists]) => stateExists)).toBe(true);
+    expect(fs.existsSync(testState.root)).toBe(false);
   });
 
   it("drains tracked sidecars and resets fixture state after the first cleanup failure", async () => {
@@ -2875,7 +2914,7 @@ function createPostAttachParams(overrides: Partial<PostAttachParams> = {}): Post
     onPostReadySidecars: composeTrackedPublisher(publishedPostReadySidecars, undefined),
     onGatewayLifetimeSidecars: composeTrackedPublisher(publishedGatewayLifetimeSidecars, undefined),
     unregisterConnectionDependentSidecar: vi.fn(),
-    trackStartupWork: (run) => run(new AbortController().signal),
+    trackStartupWork: createDeferredWorkTracker(fixtureStartupWork),
     ...overrides,
   };
 }
