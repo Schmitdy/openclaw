@@ -20,7 +20,7 @@ import { CommandLane } from "../../process/lanes.js";
 import { withSessionTurn } from "../../sessions/session-controller.admission.js";
 import { retireSessionControllerInput } from "../../sessions/session-controller.mailbox.js";
 import { cleanupSessionStateForTest } from "../../test-utils/session-state-cleanup.js";
-import { createSubagentRunRecord, waitForFast } from "../subagent-test-fixtures.test-helpers.js";
+import { createSubagentRunRecord } from "../subagent-test-fixtures.test-helpers.js";
 import { reserveRestoredSubagentControllerSources } from "../subagents/announce/subagent-announce-controller-source.js";
 import { subagentRuns } from "../subagents/registry/subagent-registry-memory.js";
 import { createRecoveryRuntimeFixture } from "./main-session-recovery-runtime.test-support.js";
@@ -281,7 +281,7 @@ it.for([false, true])(
       .mockImplementation(
         <T>(lane: string, task: () => Promise<T>, opts?: Parameters<typeof enqueue>[2]) => {
           const work = enqueue(lane, task, opts);
-          if (lane === CommandLane.Main) {
+          if (lane === "main") {
             capacityEntered.resolve();
           }
           return work;
