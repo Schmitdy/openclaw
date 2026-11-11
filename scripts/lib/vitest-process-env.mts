@@ -180,6 +180,7 @@ export function resolveVitestNodeArgs(env: NodeJS.ProcessEnv = process.env): str
       ? []
       : ["--no-maglev"]),
     "--no-concurrent-sparkplug",
+    "--expose-gc",
   ];
 }
 

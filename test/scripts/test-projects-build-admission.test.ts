@@ -575,6 +575,7 @@ describe("full-suite timing metadata", () => {
           "node",
           "--no-maglev",
           "--no-concurrent-sparkplug",
+          "--expose-gc",
           resolveVitestCliEntry(),
           "run",
           "--config",
