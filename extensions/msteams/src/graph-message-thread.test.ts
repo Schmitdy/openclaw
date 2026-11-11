@@ -9,9 +9,6 @@ vi.mock("./graph.js", async (original) => ({
   fetchGraphJson: graph.fetch,
   resolveGraphToken: graph.token,
 }));
-vi.mock("./channel.runtime.js", async () => ({
-  msTeamsChannelRuntime: { getMessageMSTeams: (await import("./graph-messages.js")).getMessageMSTeams },
-}));
 
 const teamId = "11111111-1111-1111-1111-111111111111";
 const channelId = "19:channel@thread.tacv2";
@@ -30,12 +27,22 @@ function message(id: string, parent: string | null = "root") {
     body: { content: `Message ${id}`, contentType: "text" },
     from: { user: { id: "author", displayName: "Example Author" } },
     mentions: [{ id: 0, mentionText: "Example", mentioned: { user: { id: "mentioned-user" } } }],
-    attachments: [{ id: "menu-pdf", name: "menu.pdf", contentType: "application/pdf", contentUrl: "https://example.invalid/menu.pdf" }],
+    attachments: [
+      {
+        id: "menu-pdf",
+        name: "menu.pdf",
+        contentType: "application/pdf",
+        contentUrl: "https://example.invalid/menu.pdf",
+      },
+    ],
     channelIdentity: { teamId, channelId },
   };
 }
 const root = message("root", null);
-function read(params: Record<string, unknown> = {}, context: Partial<ChannelMessageActionContext> = {}) {
+function read(
+  params: Record<string, unknown> = {},
+  context: Partial<ChannelMessageActionContext> = {},
+) {
   return handle({
     channel: "msteams",
     cfg: { channels: { msteams: { groupPolicy: "allowlist" } } },
@@ -107,28 +114,46 @@ describe("native Teams read action with complete channel threads", () => {
 
   it("retains replies beyond the inbound newest-50 window", async () => {
     pages(
-      { value: Array.from({ length: 50 }, (_, index) => message(`reply-${index}`)), "@odata.nextLink": nextLink },
+      {
+        value: Array.from({ length: 50 }, (_, index) => message(`reply-${index}`)),
+        "@odata.nextLink": nextLink,
+      },
       { value: [message("last-reply")] },
     );
     const result = await getMessageMSTeams(target);
     expect(result).toMatchObject({ complete: true, hasMore: false, pageCount: 2 });
-    expect(result).toHaveProperty("messages", expect.arrayContaining([
-      expect.objectContaining({ id: "root" }),
-      expect.objectContaining({ id: "reply-0" }),
-      expect.objectContaining({ id: "last-reply" }),
-    ]));
+    expect(result).toHaveProperty(
+      "messages",
+      expect.arrayContaining([
+        expect.objectContaining({ id: "root" }),
+        expect.objectContaining({ id: "reply-0" }),
+        expect.objectContaining({ id: "last-reply" }),
+      ]),
+    );
     expect(result).toHaveProperty("messages.length", 52);
   });
 
   it("preserves attachment-only answers and deletion metadata without claiming content inspection", async () => {
     const attachment = { ...message("attachment"), body: { content: "", contentType: "text" } };
-    const deleted = { ...message("withdrawn"), deletedDateTime: "2026-01-02T03:04:07Z", from: null };
+    const deleted = {
+      ...message("withdrawn"),
+      deletedDateTime: "2026-01-02T03:04:07Z",
+      from: null,
+    };
     pages({ value: [attachment, deleted] });
     await expect(getMessageMSTeams(target)).resolves.toMatchObject({
       complete: true,
       messages: expect.arrayContaining([
-        expect.objectContaining({ id: "attachment", text: "", attachments: attachment.attachments }),
-        expect.objectContaining({ id: "withdrawn", deletedAt: deleted.deletedDateTime, from: null }),
+        expect.objectContaining({
+          id: "attachment",
+          text: "",
+          attachments: attachment.attachments,
+        }),
+        expect.objectContaining({
+          id: "withdrawn",
+          deletedAt: deleted.deletedDateTime,
+          from: null,
+        }),
       ]),
     });
   });
@@ -137,7 +162,14 @@ describe("native Teams read action with complete channel threads", () => {
     graph.fetch.mockResolvedValueOnce(root);
     const result = await read({ threadId: undefined });
     expect(result).toMatchObject({
-      details: { message: { id: "root", text: "Message root", from: root.from, createdAt: root.createdDateTime } },
+      details: {
+        message: {
+          id: "root",
+          text: "Message root",
+          from: root.from,
+          createdAt: root.createdDateTime,
+        },
+      },
     });
     expect(result.details).not.toHaveProperty("message.complete");
     expect(graph.fetch).toHaveBeenCalledTimes(1);
@@ -165,7 +197,9 @@ describe("native Teams read action with complete channel threads", () => {
   });
 
   it("rejects chat thread selection rather than treating it as a complete channel thread", async () => {
-    await expect(getMessageMSTeams({ ...target, to: "19:chat@thread.v2" })).rejects.toThrow("teamId/channelId");
+    await expect(getMessageMSTeams({ ...target, to: "19:chat@thread.v2" })).rejects.toThrow(
+      "teamId/channelId",
+    );
     expect(graph.fetch).not.toHaveBeenCalled();
   });
 });
@@ -196,23 +230,35 @@ describe("complete thread traversal failure controls", () => {
     ["wrong parent", { value: [message("reply", "foreign-root")] }],
     ["root in replies", { value: [message("root")] }],
     ["missing timestamp", { value: [{ ...message("reply"), createdDateTime: undefined }] }],
-    ["foreign channel", { value: [{ ...message("reply"), channelIdentity: { teamId, channelId: "foreign" } }] }],
+    [
+      "foreign channel",
+      { value: [{ ...message("reply"), channelIdentity: { teamId, channelId: "foreign" } }] },
+    ],
     ["malformed mentions", { value: [{ ...message("reply"), mentions: {} }] }],
     ["malformed attachments", { value: [{ ...message("reply"), attachments: {} }] }],
-    ["malformed deletion timestamp", { value: [{ ...message("reply"), deletedDateTime: "not-a-date" }] }],
+    [
+      "malformed deletion timestamp",
+      { value: [{ ...message("reply"), deletedDateTime: "not-a-date" }] },
+    ],
     ["malformed body", { value: [{ ...message("reply"), body: { content: 42 } }] }],
     ["malformed author", { value: [{ ...message("reply"), from: "author" }] }],
-    ["conflicting duplicate", { value: [message("reply"), { ...message("reply"), body: { content: "changed" } }] }],
+    [
+      "conflicting duplicate",
+      { value: [message("reply"), { ...message("reply"), body: { content: "changed" } }] },
+    ],
   ])("fails closed on %s", async (_name, page) => {
     pages(page);
     await expect(getMessageMSTeams(target)).rejects.toThrow();
   });
 
-  it.each([message("other", null), message("root", "parent")])("rejects an inconsistent root resource", async (invalidRoot) => {
-    graph.fetch.mockResolvedValueOnce(invalidRoot);
-    await expect(getMessageMSTeams(target)).rejects.toThrow("malformed identity");
-    expect(graph.fetch).toHaveBeenCalledTimes(1);
-  });
+  it.each([message("other", null), message("root", "parent")])(
+    "rejects an inconsistent root resource",
+    async (invalidRoot) => {
+      graph.fetch.mockResolvedValueOnce(invalidRoot);
+      await expect(getMessageMSTeams(target)).rejects.toThrow("malformed identity");
+      expect(graph.fetch).toHaveBeenCalledTimes(1);
+    },
+  );
 
   it("fails rather than claim completion when a later page fails", async () => {
     pages({ value: [message("reply")], "@odata.nextLink": nextLink });
@@ -246,7 +292,10 @@ describe("complete thread traversal failure controls", () => {
   it("marks an exhausted empty replies collection complete", async () => {
     pages({ value: [] });
     await expect(getMessageMSTeams(target)).resolves.toMatchObject({
-      messages: [{ id: "root", replyToId: null }], pageCount: 1, complete: true, hasMore: false,
+      messages: [{ id: "root", replyToId: null }],
+      pageCount: 1,
+      complete: true,
+      hasMore: false,
     });
   });
 });

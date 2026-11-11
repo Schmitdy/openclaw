@@ -114,7 +114,10 @@ export async function readChannelMessageThread(params: {
     });
   }
 
-  addMessage(await fetchGraphJson<unknown>({ token: params.token, path: rootPath, deadline }), true);
+  addMessage(
+    await fetchGraphJson<unknown>({ token: params.token, path: rootPath, deadline }),
+    true,
+  );
   let path = `${repliesPath}?$top=50`;
   const visited = new Set<string>();
   let pageCount = 0;
@@ -162,7 +165,9 @@ export async function readChannelMessageThread(params: {
   const replies = [...messages.values()]
     .map(({ message }) => message)
     .filter((message) => message.id !== params.rootId)
-    .toSorted((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt) || a.id.localeCompare(b.id));
+    .toSorted(
+      (a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt) || a.id.localeCompare(b.id),
+    );
   return {
     id: params.rootId,
     threadId: params.rootId,
