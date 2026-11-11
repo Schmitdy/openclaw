@@ -34,6 +34,20 @@ target authorization, or participant lookup stops its next request. Cancellation
 does not undo a mutation Microsoft has already accepted. Existing account, target,
 and owner/admin rules still apply; pinning and unpinning remain limited to chats.
 
+## Complete channel-thread reads
+
+For an explicit `read` of a channel thread, set `messageId` and `threadId` to the
+same root message ID and use the channel's `teamId/channelId` target. The existing
+read authority rules apply. A successful result contains the root followed by all
+replies in chronological order, with `complete: true` and `hasMore: false`.
+Sender, timestamps, mentions, attachment metadata, and deletion metadata are
+retained. Attachment metadata does not mean attachment contents were inspected.
+
+Reading without `threadId` still returns one message. Complete thread reads are
+channel-only; chat targets, inconsistent roots, malformed pages, unsafe
+continuations, pagination loops, and resource-limit exhaustion fail explicitly
+instead of returning a partial result marked complete.
+
 ## Reply style: threads vs posts
 
 Teams has two channel UI styles over the same underlying data model:
