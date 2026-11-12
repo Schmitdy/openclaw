@@ -4,6 +4,8 @@ import { createTestWebInboundMessage } from "../../inbound/test-message.test-hel
 
 const {
   resolvePolicyMock,
+  visibleHistoryMock,
+  visibleReplyMock,
   buildContextMock,
   isControlCommandMessageMock,
   dispatchBufferedReplyMock,
@@ -18,6 +20,8 @@ const {
   inboundDebugMock,
 } = vi.hoisted(() => ({
   resolvePolicyMock: vi.fn(),
+  visibleHistoryMock: vi.fn((params: { history: unknown[] }) => params.history),
+  visibleReplyMock: vi.fn(() => null),
   buildContextMock: vi.fn(),
   isControlCommandMessageMock: vi.fn(() => false),
   dispatchBufferedReplyMock: vi.fn(async (_params?: unknown) => ({
@@ -135,8 +139,8 @@ vi.mock("./inbound-context.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("./inbound-context.js")>();
   return {
     ...actual,
-    resolveVisibleWhatsAppGroupHistory: (params: { history: unknown[] }) => params.history,
-    resolveVisibleWhatsAppReplyContext: () => null,
+    resolveVisibleWhatsAppGroupHistory: visibleHistoryMock,
+    resolveVisibleWhatsAppReplyContext: visibleReplyMock,
   };
 });
 
@@ -203,6 +207,7 @@ function makePolicy(account: ReturnType<typeof makeAccount>) {
     isSelfChat: false,
     providerMissingFallbackApplied: false,
     isSamePhone: () => false,
+    resolveGroupAllowFrom: () => undefined,
     resolveConversationGroupPolicy: () => "allowlist",
     resolveConversationRequireMention: () => false,
   };
@@ -394,6 +399,20 @@ describe("processMessage group system prompt wiring", () => {
       "inbound web message",
     );
     expect(inboundInfoMock).toHaveBeenCalledWith(expect.stringContaining(`${body.length} chars`));
+  });
+
+  it("uses the exact group sender list for both history and reply context", async () => {
+    const groupAllowFrom = ["+15550002222"];
+    resolvePolicyMock.mockReturnValue({
+      ...makePolicy(makeAccount()),
+      groupAllowFrom: ["+15550009999"],
+      resolveGroupAllowFrom: (id: string) => (id === GROUP_JID ? groupAllowFrom : undefined),
+    });
+    await callProcessMessage();
+    expect(visibleHistoryMock).toHaveBeenLastCalledWith(
+      expect.objectContaining({ groupAllowFrom }),
+    );
+    expect(visibleReplyMock).toHaveBeenLastCalledWith(expect.objectContaining({ groupAllowFrom }));
   });
 
   it("passes pending history to context and clears it after dispatch", async () => {

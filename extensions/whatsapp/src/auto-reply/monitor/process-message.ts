@@ -189,6 +189,10 @@ export async function processMessage(params: {
     selfE164: self.e164 ?? null,
   });
   const account = inboundPolicy.account;
+  const groupAllowFrom =
+    (conversationKind === "group"
+      ? inboundPolicy.resolveGroupAllowFrom(conversationId)
+      : undefined) ?? inboundPolicy.groupAllowFrom;
   const contextVisibilityMode = resolveChannelContextVisibilityMode({
     cfg: params.cfg,
     channel: "whatsapp",
@@ -237,7 +241,7 @@ export async function processMessage(params: {
     authDir: account.authDir,
     mode: contextVisibilityMode,
     groupPolicy: inboundPolicy.groupPolicy,
-    groupAllowFrom: inboundPolicy.groupAllowFrom,
+    groupAllowFrom,
   });
 
   let combinedBody = buildInboundLine({
@@ -252,7 +256,7 @@ export async function processMessage(params: {
           history: params.groupHistory ?? params.groupHistories.get(params.groupHistoryKey) ?? [],
           mode: contextVisibilityMode,
           groupPolicy: inboundPolicy.groupPolicy,
-          groupAllowFrom: inboundPolicy.groupAllowFrom,
+          groupAllowFrom,
           authDir: account.authDir,
         })
       : undefined;
