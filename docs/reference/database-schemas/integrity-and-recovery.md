@@ -136,6 +136,11 @@ runtime/library-only updates reuse the original full-verification timestamp. Man
 interrupt uses ordinary close and can publish a seal once its writers settle.
 Forced termination before successful close cannot certify the database.
 
+During graceful shutdown, idle transcript readers retire without their normal
+warm-retention delay. Accepted reads finish first. The final writer waits for
+its matching asynchronous readers, then resumes its existing idle cleanup when
+they release. Unrelated sidecars may remain held during this database cleanup.
+
 Agent clean-close receipt messages name the agent. An intermediate `active-leases`
 receipt can precede that same agent's final `written` receipt: idle retained database
 handles still hold leases even when no agent work is running. The final handle must

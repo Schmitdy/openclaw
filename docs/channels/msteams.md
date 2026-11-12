@@ -19,6 +19,31 @@ Status: text + DM attachments are supported; channel/group file sending requires
   </Card>
 </CardGroup>
 
+## Read a complete channel thread
+
+Use the existing `read` message action with a `teamId/channelId` target, the root
+`messageId`, and the same root in `threadId`. Without `threadId`, `read` keeps its
+single-message behavior. A mismatched root or a chat target is rejected.
+
+A successful thread read returns `message.messages`, with the root first and all
+replies in chronological order. Each entry includes the provider `id`, `replyToId`
+(`null` for the root), `text`, `contentType`, `from`, `createdAt`,
+`lastModifiedAt`, `deletedAt`, native `mentions`, and attachment metadata when
+available. Attachment metadata is not a claim that attached content was read.
+The thread result also
+includes `id`, `threadId`, `pageCount` (reply collection pages), `complete: true`,
+and `hasMore: false`. These flags are returned only after pagination is exhausted.
+
+Thread reads use the same account, current-conversation, and target read policy as
+single-message reads. Continuations must stay on the existing HTTPS Graph origin
+and the exact selected thread's replies collection. Invalid pages, foreign
+messages or continuations, conflicting duplicate IDs, pagination loops, and
+provider failures fail the read rather than return partial history as complete.
+Reads are bounded to 50 reply pages, 2,501 message records including the root and
+repeated records, 8 MiB of serialized message data, and the existing 30-second
+Graph request budget shared across the root and reply pages. Exceeding a bound
+fails the read. This does not change inbound newest-50 thread enrichment.
+
 ## What each page covers
 
 - [Microsoft Teams setup](/channels/msteams/setup) — install the plugin, register the bot and Teams app, and run against a dev tunnel.

@@ -13,6 +13,14 @@ function legacy<const T extends SourceEntry>(source: T) {
 // Both concurrent writers must use the same runtime graph and version metadata.
 export const cliRecoveryEntrypoints = {
   cli: worker({ currentModuleUrl: import.meta.url, sourceWorkerName: "../entry" }),
+  secretsConfigure: worker({
+    currentModuleUrl: import.meta.url,
+    sourceWorkerName: "../secrets/configure",
+  }),
+  secretsOutput: worker({
+    currentModuleUrl: import.meta.url,
+    sourceWorkerName: "secrets-cli-output",
+  }),
   daemon: worker({ currentModuleUrl: import.meta.url, sourceWorkerName: "daemon-cli" }),
   sessionAccessor: worker({
     currentModuleUrl: import.meta.url,

@@ -113,6 +113,7 @@ function evaluate(
     JSON.stringify({
       logPath,
       clock: true,
+      rolloutPullRequest: 152415,
       routes: {
         [`GET ${pullPath}`]: pr,
         [`GET /repos/openclaw/openclaw/commits/${head}/statuses`]: [],

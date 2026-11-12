@@ -1,5 +1,9 @@
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { createDeferred, withinTest } from "../../../test/helpers/promise.js";
+import {
+  awaitGateBeforeSettlement,
+  createDeferred,
+  withinTest,
+} from "../../../test/helpers/promise.js";
 import { useAutoCleanupTempDirTracker } from "../../../test/helpers/temp-dir.js";
 import { admitReplyTurn } from "../../auto-reply/reply/reply-turn-admission.js";
 import { clearRuntimeConfigSnapshot, setRuntimeConfigSnapshot } from "../../config/io.js";
@@ -16,7 +20,7 @@ import { CommandLane } from "../../process/lanes.js";
 import { withSessionTurn } from "../../sessions/session-controller.admission.js";
 import { retireSessionControllerInput } from "../../sessions/session-controller.mailbox.js";
 import { cleanupSessionStateForTest } from "../../test-utils/session-state-cleanup.js";
-import { createSubagentRunRecord, waitForFast } from "../subagent-test-fixtures.test-helpers.js";
+import { createSubagentRunRecord } from "../subagent-test-fixtures.test-helpers.js";
 import { reserveRestoredSubagentControllerSources } from "../subagents/announce/subagent-announce-controller-source.js";
 import { subagentRuns } from "../subagents/registry/subagent-registry-memory.js";
 import { createRecoveryRuntimeFixture } from "./main-session-recovery-runtime.test-support.js";
@@ -264,15 +268,36 @@ it("resumes an unmarked startup orphan before reserving its child completions", 
   }
 });
 
-it.each([false, true])(
+it.for([false, true])(
   "respects main capacity before recovery ownership (replaced=%s)",
-  async (replaced) => {
+  async (replaced, { signal }) => {
     const { storePath, sessionKey, readEntry, retry } = await mainFixture();
     queue.setCommandLaneConcurrency("main", 1);
     const { task: blocker, release } = await blockLane("main");
+    const capacityEntered = createDeferred();
+    const enqueue = queue.enqueueCommandInLane;
+    const enqueueSpy = vi
+      .spyOn(queue, "enqueueCommandInLane")
+      .mockImplementation(
+        <T>(lane: string, task: () => Promise<T>, opts?: Parameters<typeof enqueue>[2]) => {
+          const work = enqueue(lane, task, opts);
+          if (lane === "main") {
+            capacityEntered.resolve();
+          }
+          return work;
+        },
+      );
     const recovery = retry(mockRecoveryRuntime, CommandLane.Main);
     try {
-      await waitForFast(() => expect(queue.getQueueSize("main")).toBe(2));
+      await withinTest(
+        awaitGateBeforeSettlement(
+          capacityEntered.promise,
+          recovery,
+          "Recovery settled before waiting for Main capacity",
+        ),
+        signal,
+      );
+      expect(queue.getQueueSize("main")).toBe(2);
       expect(callGateway).not.toHaveBeenCalled();
       const pending = readEntry()?.mainRestartRecovery;
       expect({
@@ -293,6 +318,7 @@ it.each([false, true])(
       release.resolve();
       dispatchSettlement.resolve();
       await Promise.allSettled([blocker, recovery]);
+      enqueueSpy.mockRestore();
     }
   },
 );

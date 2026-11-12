@@ -124,7 +124,15 @@ function runGuard(options: Options = {}) {
       ...(options.event ?? { pull_request: pr }),
     }),
   );
-  writeFileSync(fixturePath, JSON.stringify({ routes, logPath, clock: true }));
+  writeFileSync(
+    fixturePath,
+    JSON.stringify({
+      routes,
+      logPath,
+      clock: true,
+      ...(options.policy === undefined ? { rolloutPullRequest: 152415 } : {}),
+    }),
+  );
   writeFileSync(logPath, "");
   const script = options.script ?? "security-sensitive-guard";
   let scriptPath = path.resolve(`scripts/github/${script}.mjs`);

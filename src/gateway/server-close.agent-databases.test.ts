@@ -710,7 +710,8 @@ it.skipIf(process.platform !== "linux")(
       expect(isAgentRunRestartAbortReason(operation.abortSignal.reason)).toBe(true);
       expect(admitted.databaseClaim.isCurrent()).toBe(false);
       await writerReleased.promise;
-      expect(agentLeases.all(agent.path)).toEqual([]);
+      // Ordered reader retirement is asynchronous but must finish while this sidecar is held.
+      await vi.waitFor(() => expect(agentLeases.all(agent.path)).toEqual([]), { timeout: 5_000 });
       await vi.advanceTimersByTimeAsync(10_001);
       expect(exit).not.toHaveBeenCalled();
       expect(completeBoot).not.toHaveBeenCalled();

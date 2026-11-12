@@ -12,6 +12,7 @@ import {
   DEFAULT_LONG_RUNNING_VITEST_NO_OUTPUT_TIMEOUT_MS,
   resolveDefaultVitestNoOutputTimeoutMs,
   resolveRunVitestSpawnEnv,
+  resolveVitestNodeArgs,
 } from "../../scripts/lib/vitest-process-env.mts";
 import * as testRuntime from "../../scripts/lib/vitest-test-runtime.mts";
 import {
@@ -124,7 +125,7 @@ async function proveRuntimeCache(native: boolean) {
     "--testNamePattern",
     "--no-maglev",
   ];
-  const flags = ["--no-maglev", "--no-concurrent-sparkplug"];
+  const flags = ["--no-maglev", "--no-concurrent-sparkplug", "--expose-gc"];
   const expectedCommand = native
     ? testRuntime.resolveNativeBunTestCommand(files, undefined, env)
     : testRuntime.resolveVitestTestCommand([...flags, ...operands], env);
@@ -148,9 +149,11 @@ async function proveRuntimeCache(native: boolean) {
   const probe = {
     command: resolveTestNodeExecPath(),
     args: [
+      ...resolveVitestNodeArgs({}),
       "-e",
       [
         'const assert = require("node:assert/strict");',
+        'assert.equal(typeof globalThis.gc, "function");',
         'assert.equal(process.env.NODE_DISABLE_COMPILE_CACHE, "1");',
         `assert.equal(process.env.NODE_COMPILE_CACHE, ${JSON.stringify(env.NODE_COMPILE_CACHE)});`,
         'assert.equal(process.env.NODE_COMPILE_CACHE_PORTABLE, "1");',

@@ -1,19 +1,28 @@
 import fs from "node:fs/promises";
-import { expect, it, vi } from "vitest";
+import { expect, it } from "vitest";
 import {
   createApiKeyCredential as apiKey,
   createAuthProfileStoreFixture,
 } from "../agents/auth-profiles/credential-fixtures.test-support.js";
 import { noteCommittedSharedAuthStoreOwnership } from "../agents/auth-profiles/path-resolve.js";
+import { SHARED_AUTH_STORE_STATE_KEY } from "../agents/auth-profiles/sqlite-json.js";
 import { readPersistedSharedAuthProfileStoreRaw } from "../agents/auth-profiles/sqlite.js";
-import { runSecretsCommand } from "../cli/secrets-cli-output.js";
-import { createCliTtyMock, getMockCallOutput } from "../cli/test-runtime-capture.js";
+import {
+  cliMessageExitEntrypoints,
+  cliRecoveryEntrypoints,
+} from "../cli/cli-entrypoint.test-support.js";
+import { runCliProcessChild } from "../cli/cli-process-child.test-helpers.js";
+import { createCliProcessFixture } from "../cli/isolated-process-fixture.test-support.js";
+import { resolveRuntimeWorkerArgv, resolveRuntimeWorkerUrl } from "../infra/runtime-worker-url.js";
 import {
   closeOpenClawStateDatabaseForTest,
   openOpenClawStateDatabase,
 } from "../state/openclaw-state-db.js";
 import { withOpenClawTestState } from "../test-utils/openclaw-test-state.js";
-import { runSecretsConfigureInteractive } from "./configure.js";
+
+const configureUrl = resolveRuntimeWorkerUrl(cliRecoveryEntrypoints.secretsConfigure);
+const outputUrl = resolveRuntimeWorkerUrl(cliRecoveryEntrypoints.secretsOutput);
+const exitUrl = resolveRuntimeWorkerUrl(cliMessageExitEntrypoints.oneShotExit);
 
 it.each(["plaintext", "references", "missing"])(
   "keeps configure JSON output parseable without changing shared credentials (%s)",
@@ -42,30 +51,45 @@ it.each(["plaintext", "references", "missing"])(
           db.prepare(
             "INSERT INTO config_machine_state (state_key, value_json, updated_at_ms) VALUES (?, ?, 1)",
           ).run("authProfiles.store", JSON.stringify(sharedStore));
+          db.prepare(
+            "INSERT INTO config_machine_state (state_key, value_json, updated_at_ms) VALUES (?, ?, 1)",
+          ).run(SHARED_AUTH_STORE_STATE_KEY, JSON.stringify({ location: "state-db" }));
         } finally {
           closeOpenClawStateDatabaseForTest();
         }
       }
       const configBefore = await fs.readFile(state.configPath, "utf8");
-      const ttyMock = createCliTtyMock([process.stdin]);
-      using output = vi.spyOn(process.stdout, "write").mockReturnValue(true);
-      using errors = vi.spyOn(process.stderr, "write").mockReturnValue(true);
-      try {
-        ttyMock.set(true);
-        await expect(
-          runSecretsCommand(
-            true,
-            () => runSecretsConfigureInteractive({ skipProviderSetup: true }),
-            () => expect.fail("JSON failures must not use the human renderer."),
-            1,
-          ),
-        ).rejects.toMatchObject({ code: 1 });
-      } finally {
-        ttyMock.restore();
+      const cli = createCliProcessFixture(state.home, {
+        OPENCLAW_CONFIG_PATH: state.configPath,
+        OPENCLAW_STATE_DIR: state.stateDir,
+        NO_COLOR: "1",
+      });
+      const result = await runCliProcessChild({
+        nodeArgs: [
+          ...resolveRuntimeWorkerArgv(configureUrl).slice(0, -1),
+          "--input-type=module",
+          "--eval",
+          `
+            import { runSecretsCommand } from ${JSON.stringify(outputUrl.href)};
+            import { runSecretsConfigureInteractive } from ${JSON.stringify(configureUrl.href)};
+            import { runCliWithExitFinalization } from ${JSON.stringify(exitUrl.href)};
+            Object.defineProperty(process.stdin, "isTTY", { value: true, configurable: true });
+            await runCliWithExitFinalization({
+              run: () => runSecretsCommand(true,
+                () => runSecretsConfigureInteractive({ skipProviderSetup: true }),
+                () => { throw new Error("JSON failures must not use the human renderer."); }, 1),
+              onError: error => { throw error; },
+            });
+          `,
+        ],
+        env: cli.env,
+      });
+      expect(result.code, result.stderr).toBe(1);
+      expect(result.signal, result.stderr).toBeNull();
+      const { stdout, stderr } = result;
+      if (!stdout) {
+        throw new Error(stderr);
       }
-
-      const stdout = getMockCallOutput(output);
-      const stderr = getMockCallOutput(errors);
       expect(JSON.parse(stdout)).toEqual({
         ok: false,
         error: {
