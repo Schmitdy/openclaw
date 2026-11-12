@@ -653,6 +653,7 @@ process.stdout.write(JSON.stringify([
       fixture.run(extra, {
         ...process.env,
         PATH: `${bin}:${process.env.PATH}`,
+        GITHUB_REPOSITORY: "openclaw/openclaw",
         WITHDRAWAL_LOOKUPS: lookups,
       });
 

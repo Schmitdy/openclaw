@@ -215,6 +215,7 @@ export function createCronPromptExecutor(
       channelRequester: resolveCronAuthenticatedChannelRequester(params.job),
       toolsAllow: params.agentPayload?.toolsAllow,
       scheduledToolPolicy,
+      messageDelivery: { requested: params.job.delivery, resolved: params.resolvedDelivery },
       executionIdentity: params.executionIdentity,
     });
     params.onPromptAdmission(cronAdmission);
