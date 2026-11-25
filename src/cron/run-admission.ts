@@ -25,6 +25,7 @@ import {
   bindGatewayContextResolver,
   getPluginRuntimeGatewayRequestScope,
 } from "../plugins/runtime/gateway-request-scope.js";
+import { INTERNAL_MESSAGE_CHANNEL } from "../utils/message-channel-constants.js";
 import {
   captureCronJobMessageActionAuthority,
   captureCronJobMessageSourceAuthority,
@@ -32,8 +33,12 @@ import {
 } from "./active-jobs.js";
 import type { CronCompletionDeliveryFence } from "./delivery-attempt-fence.js";
 import { resolveScheduledSenderBit } from "./execution-context-registry.js";
+import type { DeliveryTargetResolution } from "./isolated-agent/delivery-target.js";
+import { resolveCronRunAdmissionSource } from "./run-authority.js";
 import type { MintedScheduledExecution } from "./scheduled-occurrence.js";
 import type { CronExecutionIdentityAdmission } from "./service/state.js";
+import { resolveCronAuthenticatedChannelRequester } from "./tools-allow-provenance.js";
+import type { CronStoredJob } from "./types.js";
 
 /** Owns one cron tool admission and its private message grant through settlement. */
 export function prepareCronRunAdmission(params: {
@@ -48,6 +53,16 @@ export function prepareCronRunAdmission(params: {
   jobId: string;
   deliveryAttemptFence: CronCompletionDeliveryFence | null;
   channelRequester?: CronAuthenticatedChannelRequester;
+  messageDelivery?: {
+    job: Pick<
+      CronStoredJob,
+      "delivery" | "owner" | "scheduledToolPolicy" | "payload" | "toolsAllowProvenance"
+    >;
+    resolved: Pick<
+      DeliveryTargetResolution,
+      "ok" | "mode" | "channel" | "to" | "accountId" | "threadId"
+    >;
+  };
   toolsAllow?: string[];
   scheduledToolPolicy?: ScheduledToolPolicyContext;
   executionIdentity?: CronExecutionIdentityAdmission;
@@ -109,6 +124,32 @@ export function prepareCronRunAdmission(params: {
   const scheduledMessageSourceAuthority = scheduledMessageAuthority
     ? captureCronJobMessageSourceAuthority({ jobId: params.jobId, operationalRunInstance })
     : undefined;
+  // Only original explicit operator routing can become current read context.
+  // Resolution alone may have inherited an account or destination from history.
+  const job = params.messageDelivery?.job;
+  const requested =
+    job && resolveCronRunAdmissionSource(job) === "operator-schedule" ? job.delivery : undefined;
+  const channelRequester =
+    params.channelRequester ?? (job ? resolveCronAuthenticatedChannelRequester(job) : undefined);
+  const resolved = params.messageDelivery?.resolved;
+  const channel = requested?.channel?.trim().toLowerCase();
+  const accountId = requested?.accountId?.trim();
+  const currentConversation =
+    scheduledMessageAuthority &&
+    scheduledToolPolicy?.mode === "trusted" &&
+    requested?.mode !== "webhook" &&
+    channel &&
+    channel !== "last" &&
+    channel !== INTERNAL_MESSAGE_CHANNEL &&
+    requested?.to?.trim() &&
+    accountId &&
+    resolved?.ok &&
+    resolved.mode === "explicit" &&
+    resolved.channel === channel &&
+    resolved.accountId === accountId &&
+    resolved.to?.trim() === requested.to.trim()
+      ? { channel, accountId, to: resolved.to, threadId: resolved.threadId }
+      : undefined;
   const deliveryAttemptFence = params.deliveryAttemptFence;
   if (scheduledMessageAuthority && !deliveryAttemptFence) {
     params.scheduledExecution.release();
@@ -127,7 +168,19 @@ export function prepareCronRunAdmission(params: {
         requesterAccountId:
           scheduledMessageAuthority && scheduledToolPolicy?.mode === "account"
             ? scheduledToolPolicy.ownerAccountId
-            : undefined,
+            : currentConversation?.accountId,
+        ...(currentConversation
+          ? {
+              toolContext: {
+                currentChannelProvider: currentConversation.channel,
+                currentChannelId: currentConversation.to,
+                currentMessagingTarget: currentConversation.to,
+                ...(currentConversation.threadId !== undefined
+                  ? { currentThreadTs: String(currentConversation.threadId) }
+                  : {}),
+              },
+            }
+          : {}),
         deliveryAttempt: {
           beforeAttempt: () => deliveryAttemptFence.beforeAttempt(),
           assertCurrent: composeSessionSourceAssertion([
@@ -145,7 +198,7 @@ export function prepareCronRunAdmission(params: {
                 ...(scheduledMessageSourceAuthority
                   ? { assertSourceCurrent: scheduledMessageSourceAuthority }
                   : {}),
-                ...(params.channelRequester ? { channelRequester: params.channelRequester } : {}),
+                ...(channelRequester ? { channelRequester } : {}),
               },
             }
           : {}),
