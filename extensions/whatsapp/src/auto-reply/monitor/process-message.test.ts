@@ -3,6 +3,8 @@ import { createTestWebInboundMessage } from "../../inbound/test-message.test-hel
 
 const {
   resolvePolicyMock,
+  visibleHistoryMock,
+  visibleReplyMock,
   buildContextMock,
   isControlCommandMessageMock,
   replyPlanParamsMock,
@@ -16,6 +18,8 @@ const {
   dmRouteTargetMock,
 } = vi.hoisted(() => ({
   resolvePolicyMock: vi.fn(),
+  visibleHistoryMock: vi.fn((params: { history: unknown[] }) => params.history),
+  visibleReplyMock: vi.fn(() => null),
   buildContextMock: vi.fn(),
   isControlCommandMessageMock: vi.fn(() => false),
   replyPlanParamsMock: vi.fn(),
@@ -101,8 +105,8 @@ vi.mock("./ack-reaction.js", async (importOriginal) => ({
 
 vi.mock("./inbound-context.js", async (importOriginal) => ({
   ...(await importOriginal<typeof import("./inbound-context.js")>()),
-  resolveVisibleWhatsAppGroupHistory: (params: { history: unknown[] }) => params.history,
-  resolveVisibleWhatsAppReplyContext: () => null,
+  resolveVisibleWhatsAppGroupHistory: visibleHistoryMock,
+  resolveVisibleWhatsAppReplyContext: visibleReplyMock,
 }));
 
 vi.mock("./last-route.js", async (importOriginal) => ({
@@ -142,6 +146,7 @@ function makePolicy() {
     configuredAllowFrom: [],
     groupAllowFrom: [],
     isSelfChat: false,
+    resolveGroupAllowFrom: () => undefined,
   };
 }
 
@@ -328,6 +333,24 @@ describe("processMessage inbound context", () => {
       expect.stringContaining(`${combinedBody.length} chars`),
     );
   });
+
+  it.each([{ senders: ["+15550002222"] }, { senders: [] }])(
+    "uses the exact sender list for history and replies: %j",
+    async ({ senders: groupAllowFrom }) => {
+      resolvePolicyMock.mockReturnValue({
+        ...makePolicy(),
+        groupAllowFrom: ["+15550009999"],
+        resolveGroupAllowFrom: (id: string) => (id === GROUP_JID ? groupAllowFrom : undefined),
+      });
+      await callProcessMessage();
+      expect(visibleHistoryMock).toHaveBeenLastCalledWith(
+        expect.objectContaining({ groupAllowFrom }),
+      );
+      expect(visibleReplyMock).toHaveBeenLastCalledWith(
+        expect.objectContaining({ groupAllowFrom }),
+      );
+    },
+  );
 
   it("passes pending history to context and clears it after dispatch", async () => {
     const historyKey = "whatsapp:default:group:123@g.us";
