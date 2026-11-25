@@ -52,6 +52,10 @@ export function resolveWhatsAppInboundPolicy(params: {
     channels: { whatsapp: { groupPolicy, groups: account.groups } },
   };
   const isSamePhone = (value?: string | null) => value != null && value === params.selfE164;
+  const resolveGroupAllowFrom = (conversationId: string) =>
+    /^\d+(?:-\d+)?@g\.us$/.test(conversationId)
+      ? account.groups?.[conversationId]?.allowFrom
+      : undefined;
   return {
     account,
     dmPolicy,
@@ -62,6 +66,7 @@ export function resolveWhatsAppInboundPolicy(params: {
     isSelfChat: account.selfChatMode ?? isSelfChatMode(params.selfE164, configuredAllowFrom),
     providerMissingFallbackApplied,
     isSamePhone,
+    resolveGroupAllowFrom,
     resolveConversationGroupPolicy: (conversationId: string) =>
       resolveChannelGroupPolicy({
         cfg: resolvedGroupCfg,
@@ -87,6 +92,9 @@ export async function resolveWhatsAppIngressAccess(params: {
   includeCommand?: boolean;
   contextBinding?: ChannelIngressContextBinding;
 }) {
+  const groupAllowFrom = params.isGroup
+    ? params.policy.resolveGroupAllowFrom(params.conversationId)
+    : undefined;
   return await getWhatsAppRuntime().channel.inbound.ingress.resolveStable({
     channelId: "whatsapp",
     accountId: params.policy.account.accountId,
@@ -120,6 +128,14 @@ export async function resolveWhatsAppIngressAccess(params: {
         ? [...params.policy.dmAllowFrom, params.senderId]
         : params.policy.dmAllowFrom,
     groupAllowFrom: params.policy.groupAllowFrom,
+    route:
+      groupAllowFrom === undefined
+        ? undefined
+        : {
+            id: "whatsapp-exact-group-senders",
+            senderPolicy: "replace",
+            senderAllowFrom: groupAllowFrom,
+          },
     command: params.includeCommand === true ? {} : undefined,
   });
 }

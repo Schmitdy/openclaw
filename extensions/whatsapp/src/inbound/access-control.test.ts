@@ -10,6 +10,7 @@ import {
   setupAccessControlTestHarness,
   upsertPairingRequestMock,
 } from "./access-control.test-harness.js";
+import { resolveWhatsAppAdmissionChannelIngress } from "./admission.js";
 import { normalizeTestWhatsAppMessage } from "./message-normalization.test-helper.js";
 import { createTestWebInboundMessage } from "./test-message.test-helper.js";
 
@@ -67,6 +68,54 @@ async function checkBoth(allowed: boolean, input: Input = {}, group = false) {
 }
 
 describe("WhatsApp admission and command authorization", () => {
+  it("replaces exact numeric group senders without granting DM or command access", async () => {
+    const other = "120363401234567891@g.us";
+    const groups = {
+      [GROUP]: { allowFrom: [SELF, PHONE], requireMention: true },
+      [other]: {},
+      "*": { allowFrom: ["*"] },
+    };
+    configure({
+      accounts: {
+        work: {
+          dmPolicy: "allowlist",
+          allowFrom: [SELF],
+          groupPolicy: "allowlist",
+          groupAllowFrom: [SELF],
+          groups,
+        },
+      },
+    });
+    const admitted = await access({ accountId: "work", ...groupMessage });
+    expect(admitted).not.toBeNull();
+    if (!admitted) {
+      throw new Error("Expected exact-group sender admission");
+    }
+    const dispatched = await resolveWhatsAppAdmissionChannelIngress(admitted.admission, {
+      agentId: "main",
+      sessionKey: `agent:main:whatsapp:group:${GROUP}`,
+      inboundEventKind: "user_request",
+    });
+    expect(dispatched?.senderAccess.allowed).toBe(true);
+    expect(await command({}, true)).toBe(false);
+    expect(await command({ senderE164: SELF }, true)).toBe(true);
+    for (const from of [
+      other,
+      "120363401234567892@g.us",
+      "invalid@g.us",
+      `telegram:group:${GROUP}`,
+    ]) {
+      expect(await access({ accountId: "work", group: true, from })).toBeNull();
+    }
+    expect(await access({ accountId: "work" })).toBeNull();
+    expect(
+      await access({ accountId: "work", group: true, from: other, senderE164: SELF }),
+    ).not.toBeNull();
+    groups[GROUP].allowFrom = [];
+    expect(await access({ accountId: "work", ...groupMessage, senderE164: SELF })).toBeNull();
+    noPairing();
+  });
+
   it("does not authorize unresolved group LIDs as phone allowlist entries", async () => {
     configure({ groupPolicy: "allowlist", groupAllowFrom: [PHONE] });
     expect(
