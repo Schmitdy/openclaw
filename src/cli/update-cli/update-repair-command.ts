@@ -7,6 +7,12 @@ import {
 } from "../../config/config.js";
 import { resolveGatewayPort } from "../../config/paths.js";
 import { resolveServiceManagerEnv } from "../../daemon/service-process-env.js";
+import { withDatabaseEngineSelection } from "../../infra/database-engine/context.js";
+import { resolveDatabaseFamilyEngines } from "../../infra/database-engine/registry.js";
+import {
+  acquireStateDatabaseSchemaLease,
+  hasActiveGatewayStateOwner,
+} from "../../infra/gateway-state-owner.js";
 import { compareSemverStrings } from "../../infra/npm-registry-spec.js";
 import { readPackageVersion } from "../../infra/package-json.js";
 import {
@@ -34,6 +40,7 @@ import {
   isFreshUnacknowledgedAbandonedUpdateRun,
   recordedUpdateRunDrivers,
   inspectUpdateRunAbandonment,
+  hasUnrecordedUpdateRunDriver,
 } from "../../infra/update-run-activity.js";
 import { listUnverifiedDataAtRisk } from "../../infra/update-run-data-at-risk.js";
 import { inspectUpdateRunDriver } from "../../infra/update-run-driver.js";
@@ -54,10 +61,14 @@ import {
 } from "../../infra/update-run-record.js";
 import {
   assertUpdateRecoveryAdmission,
+  assertUpdateRecoveryDirectoryAdmission,
   inspectPluginCohortRecoveryAdmission,
 } from "../../infra/update-run-recovery-admission.js";
 import type { UpdateRecoveryFence } from "../../infra/update-run-recovery-types.js";
-import { pluginCohortRecoveryMatchesSource } from "../../infra/update-run-recovery.js";
+import {
+  assertNoPendingUpdateRecovery,
+  pluginCohortRecoveryMatchesSource,
+} from "../../infra/update-run-recovery.js";
 import { DEFAULT_UPDATE_STEP_TIMEOUT_MS } from "../../infra/update-run-timeouts.js";
 import { hasCommandProcessCleanupError } from "../../process/exec-result.js";
 import { defaultRuntime } from "../../runtime.js";
@@ -80,7 +91,10 @@ import {
   resolveTargetVersion,
   type UpdateFinalizeOptions,
 } from "./shared.js";
-import { withUpdateDatabaseEngine } from "./update-command-database-engine.js";
+import {
+  readUpdateDatabaseEngineConfig,
+  withUpdateDatabaseEngine,
+} from "./update-command-database-engine.js";
 import {
   captureUpdateCommandExecutorAuthority,
   withUpdateCommandExecutor,
@@ -98,10 +112,115 @@ import {
   type RetainedUpdateCustodyReport,
 } from "./update-retained-custody.js";
 
-export function updateRepairCommand(opts: UpdateFinalizeOptions): Promise<void> {
+export function updateRepairCommand(
+  opts: UpdateFinalizeOptions & { settlePackageOnly?: boolean },
+): Promise<void> {
   const env = resolveServiceRefreshEnv(process.env, tryProcessCwd());
-  return withUpdateDatabaseEngine(env, () => repairUpdate(opts)).catch((error: unknown) => {
+  const repair = opts.settlePackageOnly
+    ? settleManualPackageOnly(opts, env)
+    : withUpdateDatabaseEngine(env, () => repairUpdate(opts));
+  return repair.catch((error: unknown) => {
     throw updateMaintenanceError(error);
+  });
+}
+
+async function settleManualPackageOnly(
+  opts: UpdateFinalizeOptions,
+  env: NodeJS.ProcessEnv,
+): Promise<void> {
+  if (
+    opts.channel !== undefined ||
+    opts.acceptCapabilities ||
+    opts.fullIntegrityCheck ||
+    opts.deferCompletionCache ||
+    env[UPDATE_RUN_ID_ENV] ||
+    env.OPENCLAW_UPDATE_RUN_HANDOFF ||
+    env[POST_CORE_UPDATE_ENV]
+  ) {
+    throw new Error(
+      "--settle-package-only requires a fresh repair without channel or maintenance options.",
+    );
+  }
+  const { snapshot, configEnv, readFailed, sourceInvalid } =
+    await readUpdateDatabaseEngineConfig(env);
+  if (readFailed || sourceInvalid || !snapshot.valid) {
+    throw new Error("Offline package settlement requires readable, valid configuration.");
+  }
+  const effectiveEngines = resolveDatabaseFamilyEngines(snapshot.sourceConfig);
+  if (effectiveEngines.state !== "sqlite") {
+    throw new Error("Offline package settlement requires local SQLite state custody.");
+  }
+  await withDatabaseEngineSelection({ effectiveEngines }, async () => {
+    const root = await resolveUpdateRoot();
+    const installKey = resolveUpdateInstallRoot(root);
+    await refuseHostOwnedUpdate(root, opts);
+    await refuseImmutableUpdateActivation(root, opts);
+    assertConfigWriteAllowedInCurrentMode({ env: configEnv });
+    const databasePath = resolveOpenClawStateSqlitePath(configEnv);
+    if (!fs.existsSync(databasePath) || hasActiveGatewayStateOwner(databasePath)) {
+      throw new Error(
+        "Offline package settlement requires an existing state database and an offline Gateway.",
+      );
+    }
+    const stateOwner = acquireStateDatabaseSchemaLease(databasePath, {
+      busyTimeoutMs: parseUpdateTimeoutMs(opts.timeout),
+    });
+    try {
+      await stateOwner.run(async () => {
+        const options = { env: configEnv };
+        await assertOpenClawStateWriteAllowedAtPath({
+          databasePath,
+          ...options,
+          recoverOrphanedSidecars: false,
+        });
+        await assertUpdateRecoveryDirectoryAdmission(databasePath);
+        // This CLI owns offline custody; native readers consume that scope without
+        // asking a separate worker to borrow this process's state lease.
+        assertNoPendingUpdateRecovery(options);
+        const active = listUpdateRuns({ active: true, limit: 100 }, options);
+        const admission = inspectUpdateRepairDriverAdmission(active, undefined);
+        if (admission.kind === "conflict") {
+          throw new Error(admission.message);
+        }
+        if (
+          active.some(
+            (run) =>
+              hasUnrecordedUpdateRunDriver(run) ||
+              !recordedUpdateRunDrivers(run).length ||
+              recordedUpdateRunDrivers(run).some(
+                (driver) => inspectUpdateRunDriver(driver) !== "dead",
+              ),
+          )
+        ) {
+          throw new Error(
+            "Offline package settlement cannot verify that all recorded update work stopped.",
+          );
+        }
+        const settlement = await settlePendingPackageActivation(installKey, undefined, undefined, {
+          offlineManualSupersession: stateOwner,
+        });
+        if (!settlement) {
+          throw new Error("No manually superseded package operation was settled.");
+        }
+        if (opts.json) {
+          defaultRuntime.writeJson({
+            status: settlement.warning ? "warning" : "ok",
+            mode: "package-settlement",
+            restart: false,
+            ...settlement,
+          });
+        } else {
+          defaultRuntime.log(
+            `Closed package operation ${settlement.operationId} as ${settlement.reason}. Recovery evidence retained at ${settlement.retained}. ${settlement.detail ?? ""}`,
+          );
+          if (settlement.warning) {
+            defaultRuntime.error(`Warning: ${settlement.warning}`);
+          }
+        }
+      });
+    } finally {
+      stateOwner.release();
+    }
   });
 }
 

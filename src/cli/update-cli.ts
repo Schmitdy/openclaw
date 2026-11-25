@@ -91,6 +91,13 @@ function createUpdateLeafAction(
 
 function registerUpdateFinalizationCommand(update: Command, name: string, hidden: boolean) {
   const command = update.command(name, { hidden });
+  if (!hidden) {
+    command.option(
+      "--settle-package-only",
+      "Settle verified manual package supersession offline without Doctor, plugins, or service changes",
+      false,
+    );
+  }
   command
     .description("Reconcile abandoned updates or repair post-update doctor and plugin convergence")
     .option("--json", "Output result as JSON", false)
@@ -111,6 +118,10 @@ function registerUpdateFinalizationCommand(update: Command, name: string, hidden
           ],
           ["openclaw update repair --channel beta", "Repair against the beta update channel."],
           ["openclaw update repair --json", "JSON output for automation."],
+          [
+            "openclaw update repair --settle-package-only",
+            "Close verified obsolete package retirement offline.",
+          ],
         ])}\n\n${theme.heading("Notes:")}\n${theme.muted(
           "- Reconciles abandoned runs when the Gateway is healthy; otherwise repairs post-update state",
         )}\n${theme.muted("- Runs Doctor repair and plugin convergence; repair restores only a service it stops")}\n\n${theme.muted(
@@ -139,6 +150,7 @@ function registerUpdateFinalizationCommand(update: Command, name: string, hidden
             Boolean(opts.fullIntegrityCheck) ||
             Boolean(inheritOptionFromParent<boolean>(actionCommand, "fullIntegrityCheck")),
           deferCompletionCache: hidden && process.env[POST_CORE_UPDATE_ENV]?.trim() === "1",
+          ...(!hidden && opts.settlePackageOnly ? { settlePackageOnly: true } : {}),
         });
       }),
     );

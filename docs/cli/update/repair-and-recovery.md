@@ -1143,6 +1143,49 @@ automation can use `openclaw update repair --accept-capabilities`. Acceptance
 applies to each artifact's recomputed declared surface during this invocation;
 it does not approve future capability additions.
 
+### Settle a manually superseded package offline
+
+After a verified manual replacement at the same installed package root, a CLI
+containing this repair supports:
+
+```bash
+openclaw update repair --settle-package-only --no-restart --json
+```
+
+This explicit route closes only an obsolete `retiring` package publication whose
+receipt selected the candidate and recorded removal of the previous package.
+The installed directory must replace both recorded generations, its launchers
+must replace the recorded publication, and the existing managed handoff lease
+database must have a verified changed identity. The replacement must be newer
+than the recorded candidate and pass the native dist inventory, build-info,
+root manifest, entry-target, launcher, ownership, and exclusive executor checks.
+The same native verification limits described above apply: the root manifest is
+field-verified, and top-level entry targets are checked for resolution rather
+than content. Extra unverified dist paths remain reported in the receipt.
+
+The Gateway must already be offline. Native exclusive state custody and
+read-only recovery admission reject a live state owner, active or ambiguous
+update work, corrupt evidence, or pending database or configuration restoration.
+This route does not reconcile unrelated update history or plugin recovery.
+`--channel`, `--accept-capabilities`, and `--full-integrity-check` cannot be
+combined with `--settle-package-only`.
+
+Success reports the original operation ID, verification detail, and retained
+evidence path. Only the package settlement receipt changes; the original
+descriptor, helper, and remaining recovery files are preserved through native
+archival. Configuration, shared-state schemas, unrelated captures, and the
+installed package and launchers remain unchanged. Doctor, plugin convergence,
+package managers, service operations, state migration, and state restoration do
+not run. An archival warning means the durable settlement succeeded but evidence
+archival needs inspection. This receipt does not attest Gateway readiness or
+complete any wider update. Ordinary `update repair`, including `--no-restart`,
+keeps its existing Doctor and plugin maintenance behavior.
+
+If any required fact cannot be verified, this route refuses before closing the
+operation. Keep its evidence and use its existing recovery owner; this flag does
+not waive restoration or service custody requirements. The original installed
+updater and sealed helper do not gain this behavior from a newer staged package.
+
 ### Skipped legacy audit recovery
 
 In native `auto` mode on Linux, fs-safe handles legacy audit moves on filesystems

@@ -12,6 +12,8 @@ import {
 } from "../../scripts/lib/package-dist-inventory-contract.mts";
 import { hasErrnoCode } from "./errno.js";
 import { readRootJsonObjectSync } from "./json-files.js";
+import { compareOpenClawReleaseVersions } from "./npm-registry-spec.js";
+import { readPackageVersion } from "./package-json.js";
 import { packageActivationIdentityOrAbsent as entryIdentity } from "./package-update-activation-custody.js";
 import {
   packageActivationIdentity,
@@ -79,6 +81,63 @@ export function isUnpublishedPreparation(record: PackageActivationRecord, instal
     record.intent === null &&
     record.publications.length === 0 &&
     installed === record.descriptor.previous.identity
+  );
+}
+
+/** Offline closure cannot resume publication, roll back, or adopt an unchanged lease. */
+export function assertOfflineManualPackageSupersession(
+  record: PackageActivationRecord,
+  installKey: string,
+  lease: ReturnType<typeof inspectPackageActivationLease>,
+  replacedInstallation: boolean,
+) {
+  if (
+    record.phase !== "retiring" ||
+    record.intent?.kind !== "remove" ||
+    record.intent.name !== "previous" ||
+    record.intent.selected !== "candidate" ||
+    record.intent.identity !== record.descriptor.previous.identity ||
+    record.descriptor.authority.installKey !== installKey ||
+    !replacedInstallation ||
+    !lease.current ||
+    !lease.changed ||
+    lease.foreignDirectory
+  ) {
+    throw new Error(
+      "Offline package settlement requires a manually superseded retiring candidate, a recorded previous-package removal, and a verified changed lease database.",
+    );
+  }
+}
+
+/** Manual replacement must earn the installed-package checks, including on a remount. */
+export async function verifyManualPackagePublicationSettlement(
+  record: PackageActivationRecord,
+  assertCurrent: () => void,
+  replacementIdentity: string,
+  identities?: NonNullable<ReturnType<PackageActivationJournal["inspectRemount"]>>,
+) {
+  const descriptor = record.descriptor;
+  const version = await readPackageVersion(descriptor.authority.installKey);
+  if (
+    !version ||
+    (compareOpenClawReleaseVersions(version, descriptor.candidate.version) ?? -1) <= 0
+  ) {
+    throw new Error("Package recovery requires a verified newer manual installation.");
+  }
+  return await verifyPackagePublicationSettlement(
+    {
+      ...record,
+      descriptor: {
+        ...descriptor,
+        candidate: { identity: replacementIdentity, version },
+        binIdentity: identities
+          ? identities.bind(descriptor.binIdentity, () =>
+              packageActivationIdentity(descriptor.binDir, "parent"),
+            )
+          : descriptor.binIdentity,
+      },
+    },
+    assertCurrent,
   );
 }
 
