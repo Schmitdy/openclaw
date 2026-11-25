@@ -11,8 +11,6 @@ import { createSubsystemLogger } from "../logging/subsystem.js";
 import { requireDirectorySync, syncDirectory } from "./directory-durability.js";
 import { resolveExecutablePath } from "./executable-path.js";
 import { retainMutationAuthority } from "./mutation-authority.js";
-import { compareOpenClawReleaseVersions } from "./npm-registry-spec.js";
-import { readPackageVersion } from "./package-json.js";
 import { resolvePackageReleaseSlotForRootSync } from "./package-release-slot-path.js";
 import {
   archivePackageActivationCustody,
@@ -45,6 +43,8 @@ import {
 } from "./package-update-activation-prepare.js";
 import {
   inspectPackageActivationLease,
+  assertOfflineManualPackageSupersession,
+  verifyManualPackagePublicationSettlement,
   inspectRemountedPackagePublication,
   isForeignLeaseDirectory,
   isUnpublishedPreparation,
@@ -279,11 +279,16 @@ export async function settlePendingPackageActivation(
     operationId?: string;
     /** Asserts an exclusive installation claim the caller already holds. */
     owner?: () => void;
+    /** Native offline state custody; restrict settlement to a superseded retirement. */
+    offlineManualSupersession?: UpdateRecoveryFence;
   },
 ): Promise<PackageActivationSettlement | undefined> {
   const anchor = resolvePackageActivationAnchor(installKey);
   if (!expectedCompleted && !fs.existsSync(resolvePackageActivationJournalPath(anchor))) {
     assertNoPendingPackageActivation(installKey);
+    if (options?.offlineManualSupersession) {
+      throw new Error("Offline package settlement requires an existing retiring operation.");
+    }
     return undefined;
   }
   const { linkedCompleted, journal, admission, initial } = await readPackageActivationSettlement(
@@ -299,7 +304,11 @@ export async function settlePendingPackageActivation(
   // then also closes the aborted or published operation. A caller's own claim is
   // not known to be in that store, so it never resumes.
   const resumable =
-    complete || expectedCompleted || options?.operationId || options?.owner
+    complete ||
+    expectedCompleted ||
+    options?.operationId ||
+    options?.owner ||
+    options?.offlineManualSupersession
       ? undefined
       : inspectResumablePackagePublication(journal, initial);
   if (resumable) {
@@ -400,6 +409,10 @@ export async function settlePendingPackageActivation(
     (initial.phase === "superseded" && initial.intent?.kind === "recovery-lease-missing");
   const leaseIdentityChanged = leaseWasMissing || lease.changed;
   const manualReplacement = ![previousIdentity, candidateIdentity].includes(replacementIdentity);
+  if (options?.offlineManualSupersession) {
+    options.offlineManualSupersession.assertCurrent();
+    assertOfflineManualPackageSupersession(initial, installKey, lease, replacedInstallation);
+  }
   const reason = manualReplacement
     ? "superseded-by-manual-install"
     : leaseWasMissing
@@ -512,7 +525,10 @@ export async function settlePendingPackageActivation(
         );
   return withSettlementOwner(
     async (assertOwner) => {
-      const assertCurrent = retainMutationAuthority(assertOwner);
+      const assertCurrent = retainMutationAuthority(() => {
+        assertOwner();
+        options?.offlineManualSupersession?.assertCurrent();
+      });
       assertManagedUpdateLeaseDatabaseIdentity(currentDatabase);
       admission?.admit(assertCurrent);
       journal.assertCurrent(initial);
@@ -599,26 +615,12 @@ export async function settlePendingPackageActivation(
           settled: true,
           detail: receipt?.detail ?? verified.detail,
         };
-      } else if (identities && manualReplacement) {
-        const version = await readPackageVersion(installKey);
-        if (
-          !version ||
-          (compareOpenClawReleaseVersions(version, initial.descriptor.candidate.version) ?? -1) <= 0
-        ) {
-          throw new Error("Remounted recovery requires a verified newer manual installation.");
-        }
-        const verified = await verifyPackagePublicationSettlement(
-          {
-            ...initial,
-            descriptor: {
-              ...initial.descriptor,
-              candidate: { identity: replacementIdentity, version },
-              binIdentity: identities.bind(initial.descriptor.binIdentity, () =>
-                packageActivationIdentity(initial.descriptor.binDir, "parent"),
-              ),
-            },
-          },
+      } else if ((identities || options?.offlineManualSupersession) && manualReplacement) {
+        const verified = await verifyManualPackagePublicationSettlement(
+          initial,
           assertReplacement,
+          replacementIdentity,
+          identities,
         );
         assertReplacement = verified.assertUnchanged;
         if (!priorSettlement) {

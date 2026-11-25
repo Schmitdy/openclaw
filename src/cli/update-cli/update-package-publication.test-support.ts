@@ -12,6 +12,7 @@ import {
   publicationActivation,
   withPublicationFence,
 } from "../../infra/package-update-publication.test-support.js";
+import { writePackageRoot } from "../../infra/package-update-steps.test-support.js";
 import { createPackageSwapFixture } from "../../infra/package-update-swap.test-support.js";
 
 export async function preparePackagePublication(
@@ -38,8 +39,12 @@ export async function preparePackagePublication(
 export async function createInterruptedPackagePublication(
   fixtureRoot: string,
   phase: "prepared" | "publishing" | "publication-complete" = "publishing",
+  versions = { previous: "1.0.0", candidate: "2.0.0" },
 ) {
   const f = await createPackageSwapFixture(fixtureRoot);
+  if (versions.previous !== "1.0.0") {
+    await writePackageRoot(f.packageRoot, versions.previous);
+  }
   const stageRoot = f.params.stage.packageRoot;
   const write = (file: string, value: string | object) => {
     const target = path.join(stageRoot, file);
@@ -48,7 +53,7 @@ export async function createInterruptedPackagePublication(
   };
   write("package.json", {
     name: "openclaw",
-    version: "2.0.0",
+    version: versions.candidate,
     type: "module",
     main: "dist/index.js",
     exports: { ".": { import: "./dist/index.js", default: ["./dist/index.js", null] } },
@@ -56,7 +61,7 @@ export async function createInterruptedPackagePublication(
   });
   write("openclaw.mjs", 'import "./dist/index.js";\n');
   write("dist/scoped/package.json", { type: "module" });
-  write("dist/build-info.json", { version: "2.0.0" });
+  write("dist/build-info.json", { version: versions.candidate });
   const stagedLauncher = path.join(f.params.stage.layout.binDir, "openclaw");
   fs.unlinkSync(stagedLauncher);
   fs.symlinkSync("../lib/node_modules/openclaw/openclaw.mjs", stagedLauncher);
