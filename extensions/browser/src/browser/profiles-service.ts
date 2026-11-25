@@ -130,7 +130,10 @@ export function createBrowserProfilesService(ctx: BrowserRouteContext) {
   };
 
   const listSystemProfiles = async (browser?: string): Promise<SystemProfileInfo[]> => {
-    if (process.platform !== "darwin") {
+    if (
+      process.platform !== "darwin" ||
+      getRuntimeConfig().browser?.allowSystemProfileImport === false
+    ) {
       return [];
     }
     return discoverSystemProfiles(browser);

@@ -14,6 +14,7 @@ import {
   getOrCreateProfileRuntime,
   registerProfileHandle,
 } from "./server-context.lifecycle.js";
+import { listSystemProfiles as discoverSystemProfiles } from "./system-profiles.js";
 import { movePathToTrash } from "./trash.js";
 
 const tempDirs = useAutoCleanupTempDirTracker(afterEach);
@@ -52,6 +53,11 @@ vi.mock("openclaw/plugin-sdk/runtime-config-snapshot", async (importOriginal) =>
 
 vi.mock("./trash.js", () => ({
   movePathToTrash: vi.fn(async (targetPath: string) => targetPath),
+}));
+
+vi.mock("./system-profiles.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./system-profiles.js")>()),
+  listSystemProfiles: vi.fn<typeof import("./system-profiles.js").listSystemProfiles>(),
 }));
 
 vi.mock("./chrome-mcp.js", () => ({
@@ -171,6 +177,36 @@ describe("BrowserProfilesService", () => {
     vi.resetAllMocks();
     lifecycleMocks.stopOwnedOpenClawChrome.mockResolvedValue({ status: "not-running" });
     vi.mocked(getRuntimeConfig).mockReturnValue({ browser: { profiles: {} } });
+  });
+
+  describe("listSystemProfiles", () => {
+    const platformDescriptor = Object.getOwnPropertyDescriptor(process, "platform")!;
+
+    afterEach(() => Object.defineProperty(process, "platform", platformDescriptor));
+
+    it.each([
+      ["darwin", { browser: { allowSystemProfileImport: false } }, false],
+      ["darwin", { browser: { allowSystemProfileImport: true } }, true],
+      ["darwin", { browser: {} }, true],
+      ["darwin", {}, true],
+      ["linux", { browser: { allowSystemProfileImport: false } }, false],
+      ["linux", { browser: { allowSystemProfileImport: true } }, false],
+      ["linux", {}, false],
+    ] as const)("on %s with config %j discovers=%s", async (platform, config, discovers) => {
+      Object.defineProperty(process, "platform", { ...platformDescriptor, value: platform });
+      vi.mocked(getRuntimeConfig).mockReturnValue(config);
+      const profiles = [{ browser: "brave", id: "Default", name: "Work", hasCookies: false }];
+      vi.mocked(discoverSystemProfiles).mockResolvedValue(profiles);
+      const { service } = createCtx();
+
+      await expect(service.listSystemProfiles("brave")).resolves.toEqual(discovers ? profiles : []);
+
+      if (discovers) {
+        expect(discoverSystemProfiles).toHaveBeenCalledExactlyOnceWith("brave");
+      } else {
+        expect(discoverSystemProfiles).not.toHaveBeenCalled();
+      }
+    });
   });
 
   it("round-trips prototype-like profile names as own entries", async () => {
