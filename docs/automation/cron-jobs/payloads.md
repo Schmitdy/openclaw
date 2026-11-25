@@ -104,7 +104,13 @@ With `message` in the tool cap, scheduled agent turns can read messages and chan
 information on supported channel plugins without an inbound chat. Operator-created
 jobs use the current operator read policy. Agent-created jobs retain their recorded
 creator origin and account, and the channel's delegated read restrictions still
-apply. Delivery settings do not grant read access. Script payloads and condition triggers
+apply. For an operator-created isolated agent turn, an original delivery route
+that explicitly names a channel, target, and account can supply the exact current
+conversation context after successful explicit native resolution with matching
+channel, target, and account. External plugins still require an exact target and
+account match. Missing, inherited, implicit, internal, webhook, or mismatched routes
+do not supply this context. Account-created jobs keep their creator-origin restrictions.
+Script payloads and condition triggers
 use the same recorded creator origin at message-action admission; the channel
 still enforces its own restrictions on reads and mutations.
 

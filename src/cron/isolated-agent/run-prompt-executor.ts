@@ -43,7 +43,6 @@ import { resolveCronJobToolPolicyContext } from "../execution-context-admission.
 import { resolveScheduledRunMemoryReceipt } from "../execution-context-registry.js";
 import { prepareCronRunAdmission } from "../run-admission.js";
 import { prepareCronRunInference } from "../run-inference.js";
-import { resolveCronAuthenticatedChannelRequester } from "../tools-allow-provenance.js";
 import { isCommandStyleCronMessage } from "./command-style-prompt.js";
 import {
   assertCronCandidateSandboxPlacement,
@@ -222,7 +221,7 @@ export function createCronPromptExecutor(
       sessionId: params.cronSession.sessionEntry.sessionId,
       sessionKey: params.runSessionKey,
       jobId: params.job.id,
-      channelRequester: resolveCronAuthenticatedChannelRequester(params.job),
+      messageDelivery: { job: params.job, resolved: params.resolvedDelivery },
       toolsAllow: params.agentPayload?.toolsAllow,
       scheduledToolPolicy,
       executionIdentity: params.executionIdentity,
