@@ -36,6 +36,7 @@ import {
   UpdateDoctorDeferredInspectionCheckIdsSchema,
 } from "../../infra/update-doctor-result.js";
 import { createUpdateRun, recordUpdateRunDiagnostic } from "../../infra/update-run-ledger.js";
+import { withPluginGenerationSourceCustody } from "../../plugins/plugin-generation-source-lookup.js";
 import { hasCommandProcessCleanupError } from "../../process/exec-result.js";
 import { defaultRuntime, ExitError } from "../../runtime.js";
 import { withArtifactPreservingStateReads } from "../../state/artifact-preserving-state-reads.js";
@@ -51,6 +52,7 @@ import {
   captureUpdateConfigSnapshot,
   readUpdateConfigSnapshot,
 } from "./update-command-config-snapshot.js";
+import { preflightSupervisedDoctorPlugins } from "./update-command-doctor-plugin-preflight.js";
 
 const ReceiptSchema = z.object({
   schemaVersion: z.literal(1),
@@ -157,6 +159,15 @@ export async function updateMigrateCommand(
   backupRoot: string,
   options: { fullIntegrityCheck?: boolean } = {},
 ): Promise<void> {
+  return withPluginGenerationSourceCustody(() =>
+    migrateWithRetainedPluginSources(backupRoot, options),
+  );
+}
+
+async function migrateWithRetainedPluginSources(
+  backupRoot: string,
+  options: { fullIntegrityCheck?: boolean } = {},
+): Promise<void> {
   const startedAtMs = Date.now();
   const measure = <T>(phase: string, run: () => T | Promise<T>) =>
     withDoctorProgress(
@@ -179,6 +190,9 @@ export async function updateMigrateCommand(
           projectHeartbeatConfigForUpdateAdmission(snapshot, env, false),
       }),
     ),
+  );
+  await measure("plugin-preflight", () =>
+    preflightSupervisedDoctorPlugins(source.configSnapshot, env),
   );
   const preflight = await measure("schema-preflight", () => prepareDoctorDatabasePreflight());
   if (hasSchemaRefusal(preflight)) {
@@ -273,7 +287,9 @@ export async function updateMigrateCommand(
   const doctorEnv = {
     OPENCLAW_SERVICE_REPAIR_POLICY: "external",
     OPENCLAW_UPDATE_IN_PROGRESS: "1",
-    OPENCLAW_UPDATE_POST_CORE_CONVERGENCE: "1",
+    // Package convergence has a separate owner and is outside this rollback receipt.
+    OPENCLAW_UPDATE_POST_CORE_CONVERGENCE: "0",
+    OPENCLAW_UPDATE_DEFER_CONFIGURED_PLUGIN_INSTALL_REPAIR: "1",
     OPENCLAW_UPDATE_PARENT_SUPPORTS_DOCTOR_CONFIG_WRITE: "1",
     OPENCLAW_UPDATE_PARENT_RUNS_POST_ACTIVATION_INSPECTIONS: "reported-checks",
     // Native migration owns the in-process receipt, not an inherited parent IPC file.

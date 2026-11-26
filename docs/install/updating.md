@@ -576,6 +576,13 @@ initiating process; only serializable options cross the migrated-update handoff.
 
 Native `openclaw update migrate` reports progress while inspecting configuration
 and schemas, capturing its database backup, and verifying the migrated schemas.
+Native preflight and migration inspect required installed Doctor sources under
+temporary source-capture custody before live maintenance or backup publication.
+An incompatible or unavailable required source refuses admission. Migration
+defers package installation and convergence; it does not replace plugin files.
+Its recovery receipt restores configuration and governed databases, not plugin
+source trees. A supervisor that separately replaces plugin files must first
+capture and verify restoration of those exact files and their inventory selection.
 Before reporting migration complete, the candidate checks configured and discovered
 nonheld agent databases against its schema and ownership requirements using the
 post-Doctor configuration. This includes stores startup can reopen after their
