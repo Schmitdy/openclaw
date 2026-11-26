@@ -83,11 +83,16 @@ How to read the results:
 - If `start` and `tabs` succeed but `open` or `navigate` fails, the browser control plane is up and the failure is in navigation policy or the target page.
 - If `start`, `tabs`, and `open` all succeed, the basic managed-browser control path is healthy.
 
-A cold Playwright connection must initialize every existing page in the profile.
-If a renderer is unresponsive, even a snapshot of a healthy tab can time out.
-When the error names a page target, close that target in the browser or provider
-dashboard and retry. If direct closure is unavailable, restart the affected
-browser profile. OpenClaw does not automatically close user-owned tabs.
+A browser-wide cold Playwright connection initializes every existing page in the
+profile, so an unresponsive renderer can block it. For Chromium requests with an
+exact target ID, OpenClaw can instead attach only that page through the same guarded
+CDP transport. Snapshots and actions retain the native document identities, refs,
+and navigation policy. Missing, mismatched, internal, blocked, or unresponsive
+selected targets still fail; OpenClaw never substitutes another tab.
+
+Browser-wide connections, including page creation, can still time out on an
+unresponsive sibling. An exact-target snapshot does not prove those operations
+work. OpenClaw does not automatically close user-owned tabs.
 
 Important behavior details:
 

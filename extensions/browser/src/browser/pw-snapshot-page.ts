@@ -49,6 +49,7 @@ export async function prepareSnapshotPageViaPlaywright(opts: {
   const page = await getPageForTargetId({
     cdpUrl: opts.cdpUrl,
     targetId: opts.targetId,
+    ssrfPolicy: opts.ssrfPolicy,
   });
   if (opts.ssrfPolicy) {
     await assertPageNavigationCompletedSafely({

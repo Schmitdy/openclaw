@@ -340,7 +340,9 @@ describe("pw-session getPageForTargetId", () => {
     await expect(getPageForTargetId({ cdpUrl: endpoint, targetId: "BLOCKED" })).rejects.toThrow(
       "Browser target is unavailable after SSRF policy blocked its navigation.",
     );
-    expect(connectOverCdpSpy).toHaveBeenCalledTimes(2);
+    // Recovery attaches HEALTHY alone; an unscoped selection owns a separate
+    // browser-wide connection and must still preserve endpoint quarantine.
+    expect(connectOverCdpSpy).toHaveBeenCalledTimes(3);
     await expect(
       getPageForTargetId({ cdpUrl: endpoint, targetId: "MISSING_TARGET" }),
     ).rejects.toBeInstanceOf(BrowserTabNotFoundError);

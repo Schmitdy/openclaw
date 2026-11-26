@@ -62,6 +62,8 @@ type CdpTransportOptions = {
   resolveWebSocketUrl?: () => Promise<string | undefined>;
   preparedTransport?: ConnectOverCDPTransport;
   engine?: BrowserEngineId;
+  /** Exact native page identity; never auto-attach unrelated browser targets. */
+  targetId?: string;
 };
 
 async function openCdpTransportSocket(
@@ -219,7 +221,17 @@ export async function connectOverCdpTransport(
           pendingTargetCommands.set(id, sessionId);
         }
         try {
-          wire.send(normalizer?.send(message) ?? message);
+          // Preserve Playwright's page/frame driver while replacing only its
+          // browser-wide cold attach. Page-level auto-attach still owns OOPIFs.
+          const outgoing =
+            opts.targetId && !sessionId && command?.method === "Target.setAutoAttach"
+              ? {
+                  ...command,
+                  method: "Target.attachToTarget",
+                  params: { targetId: opts.targetId, flatten: true },
+                }
+              : message;
+          wire.send(normalizer?.send(outgoing) ?? outgoing);
         } catch (error) {
           if (typeof id === "number") {
             pendingTargetCommands.delete(id);
@@ -282,6 +294,22 @@ export async function connectOverCdpTransport(
             }
             const method = readStringField(parsed, "method");
             const params = asOptionalRecord(parsed.params);
+            if (
+              opts.targetId &&
+              method === "Target.attachedToTarget" &&
+              !readStringField(parsed, "sessionId")
+            ) {
+              const info = asOptionalRecord(params?.targetInfo);
+              if (
+                readStringField(info, "type") !== "browser" &&
+                (readStringField(info, "targetId") !== opts.targetId ||
+                  readStringField(info, "type") !== "page" ||
+                  !readStringField(info, "browserContextId"))
+              ) {
+                closeTransportSocket("CDP did not attach the exact page target.");
+                continue;
+              }
+            }
             if (trackInitializationCommands && method === "Target.attachedToTarget") {
               const sessionId = readStringField(params, "sessionId");
               const targetInfo = asOptionalRecord(params?.targetInfo);

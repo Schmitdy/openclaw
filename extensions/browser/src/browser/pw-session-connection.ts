@@ -60,8 +60,26 @@ import {
 
 export { pageTargetInfo } from "./pw-session-page-target.js";
 
+// A targeted connection must never satisfy a browser-wide enumeration or a
+// different target's in-flight connect. NUL cannot occur in a valid CDP URL.
+function connectionKeys(cdpUrl: string): string[] {
+  const normalized = normalizeCdpUrl(cdpUrl);
+  return [...new Set([...cachedByCdpUrl.keys(), ...connectingByCdpUrl.keys()])].filter(
+    (key) => key === normalized || key.startsWith(`${normalized}\0`),
+  );
+}
+
+function connectionKey(cdpUrl: string, targetId?: string): string {
+  const normalized = normalizeCdpUrl(cdpUrl);
+  return targetId ? `${normalized}\0${targetId}` : normalized;
+}
+
+export function isPlaywrightBrowserConnectionCurrent(cdpUrl: string, browser: Browser): boolean {
+  return connectionKeys(cdpUrl).some((key) => cachedByCdpUrl.get(key)?.browser === browser);
+}
+
 export function hasCachedPlaywrightBrowserConnection(cdpUrl: string): boolean {
-  return cachedByCdpUrl.has(normalizeCdpUrl(cdpUrl));
+  return connectionKeys(cdpUrl).some((key) => cachedByCdpUrl.has(key));
 }
 
 export function isRecoverablePlaywrightDisconnectError(err: unknown): boolean {
@@ -231,17 +249,20 @@ export function retirePlaywrightBrowserConnectionExact(opts: {
     return task;
   };
   const capture = () => {
-    const pending = connectingByCdpUrl.get(normalized);
-    const cached = takeCachedPlaywrightBrowserConnection(normalized);
-    if (cached) {
-      void captureConnection(cached);
+    let captured = false;
+    for (const key of connectionKeys(normalized)) {
+      const pending = connectingByCdpUrl.get(key);
+      const cached = takeCachedPlaywrightBrowserConnection(key);
+      if (cached) {
+        void captureConnection(cached);
+      }
+      if (pending) {
+        const task = pending.then(captureConnection, () => {});
+        closing.push(task);
+        void task.catch(() => {});
+      }
+      captured ||= Boolean(pending || cached);
     }
-    if (pending) {
-      const task = pending.then(captureConnection, () => {});
-      closing.push(task);
-      void task.catch(() => {});
-    }
-    const captured = Boolean(pending || cached);
     retired ||= captured;
     return captured;
   };
@@ -269,13 +290,15 @@ export function evictStalePlaywrightBrowserConnection(
   cdpUrl: string,
   expectedBrowser?: Browser,
 ): void {
-  const current = cachedByCdpUrl.get(normalizeCdpUrl(cdpUrl));
-  if (expectedBrowser && current?.browser !== expectedBrowser) {
-    return;
-  }
-  const cur = takeCachedPlaywrightBrowserConnection(cdpUrl);
-  if (cur) {
-    void closeTrackedPlaywrightConnection(cur).catch(() => {});
+  for (const key of connectionKeys(cdpUrl)) {
+    const current = cachedByCdpUrl.get(key);
+    if (expectedBrowser && current?.browser !== expectedBrowser) {
+      continue;
+    }
+    const cur = takeCachedPlaywrightBrowserConnection(key);
+    if (cur) {
+      void closeTrackedPlaywrightConnection(cur).catch(() => {});
+    }
   }
 }
 
@@ -284,11 +307,13 @@ export async function closeConnectionScopedPageBrowser(
   cdpUrl: string,
   browser: Browser,
 ): Promise<void> {
-  const current = cachedByCdpUrl.get(normalizeCdpUrl(cdpUrl));
-  if (current?.browser === browser) {
+  const key = connectionKeys(cdpUrl).find(
+    (candidate) => cachedByCdpUrl.get(candidate)?.browser === browser,
+  );
+  if (key) {
     clearBlockedTargetsForCdpUrl(cdpUrl);
     clearBlockedPageRefsForCdpUrl(cdpUrl);
-    const owned = takeCachedPlaywrightBrowserConnection(cdpUrl);
+    const owned = takeCachedPlaywrightBrowserConnection(key);
     if (owned) {
       await withPlaywrightCloseTimeout(closeTrackedPlaywrightConnection(owned));
     }
@@ -345,6 +370,7 @@ export async function connectBrowser(
   ssrfPolicy?: SsrFPolicy,
   relayReference?: RelayOperationReference,
   engine?: BrowserEngineId,
+  targetId?: string,
 ): Promise<ConnectedBrowser> {
   const normalized = normalizeCdpUrl(cdpUrl);
   const relay = getBorrowedRelayCdpAccess(normalized);
@@ -356,7 +382,10 @@ export async function connectBrowser(
     observeBrowser(browser);
     return { browser };
   }
-  const cached = cachedByCdpUrl.get(normalized);
+  const scopedTarget =
+    !relay && !engine && !isConnectionScopedTargetId(targetId) ? targetId : undefined;
+  const key = cachedByCdpUrl.has(normalized) ? normalized : connectionKey(normalized, scopedTarget);
+  const cached = cachedByCdpUrl.get(key);
   if (cached) {
     if (engine && (cached.engine ?? "chromium") !== engine) {
       throw new Error("Browser engine changed; stop this profile before connecting again.");
@@ -366,11 +395,11 @@ export async function connectBrowser(
   // Run SSRF policy check only on cache miss so transient DNS failures
   // do not break active sessions that already hold a live CDP connection.
   const configuredPin = await assertCdpEndpointAllowed(normalized, ssrfPolicy);
-  const connectedDuringPolicyCheck = cachedByCdpUrl.get(normalized);
+  const connectedDuringPolicyCheck = cachedByCdpUrl.get(key);
   if (connectedDuringPolicyCheck) {
     return connectedDuringPolicyCheck;
   }
-  const connecting = connectingByCdpUrl.get(normalized);
+  const connecting = connectingByCdpUrl.get(key);
   if (connecting) {
     return await connecting;
   }
@@ -428,6 +457,7 @@ export async function connectBrowser(
                 lookup,
                 resolveWebSocketUrl,
                 ...(engine ? { engine } : {}),
+                ...(scopedTarget ? { targetId: scopedTarget } : {}),
               });
             }),
           );
@@ -454,9 +484,9 @@ export async function connectBrowser(
         let disconnected = false;
         const onDisconnected = () => {
           disconnected = true;
-          const current = cachedByCdpUrl.get(normalized);
+          const current = cachedByCdpUrl.get(key);
           if (current?.browser === browser) {
-            cachedByCdpUrl.delete(normalized);
+            cachedByCdpUrl.delete(key);
           }
         };
         // Listen before the awaited setup below, so a browser lost meanwhile is not cached.
@@ -485,8 +515,8 @@ export async function connectBrowser(
           engine,
           headless,
         };
-        if (connectingByCdpUrl.get(normalized) === pending) {
-          cachedByCdpUrl.set(normalized, connected);
+        if (connectingByCdpUrl.get(key) === pending) {
+          cachedByCdpUrl.set(key, connected);
         }
         return connected;
       } catch (err) {
@@ -509,11 +539,11 @@ export async function connectBrowser(
   };
 
   const pending = connectWithRetry().finally(() => {
-    if (connectingByCdpUrl.get(normalized) === pending) {
-      connectingByCdpUrl.delete(normalized);
+    if (connectingByCdpUrl.get(key) === pending) {
+      connectingByCdpUrl.delete(key);
     }
   });
-  connectingByCdpUrl.set(normalized, pending);
+  connectingByCdpUrl.set(key, pending);
 
   return await pending;
 }
@@ -570,6 +600,8 @@ async function getPageForTargetIdOnce(opts: {
     opts.cdpUrl,
     opts.ssrfPolicy,
     opts.relayReference,
+    undefined,
+    opts.targetId,
   );
   const pages = await getAllPages(browser);
   if (!pages.length) {
@@ -608,7 +640,16 @@ export async function getPageForTargetId(opts: {
   ssrfPolicy?: SsrFPolicy;
   relayReference?: RelayOperationReference;
 }): Promise<Page> {
-  const cachedBrowser = cachedByCdpUrl.get(normalizeCdpUrl(opts.cdpUrl))?.browser;
+  const key = connectionKey(
+    opts.cdpUrl,
+    !getBorrowedRelayCdpAccess(normalizeCdpUrl(opts.cdpUrl)) &&
+      !isConnectionScopedTargetId(opts.targetId)
+      ? opts.targetId
+      : undefined,
+  );
+  const cachedBrowser = (
+    cachedByCdpUrl.get(normalizeCdpUrl(opts.cdpUrl)) ?? cachedByCdpUrl.get(key)
+  )?.browser;
   if (isConnectionScopedTargetId(opts.targetId) && !cachedBrowser) {
     throw new Error(
       "Browser session was lost. Open a new page and take a new snapshot; previous targets and refs are invalid.",

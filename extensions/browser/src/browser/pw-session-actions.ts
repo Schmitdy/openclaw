@@ -35,6 +35,7 @@ import {
   getPageForTargetId,
   isBlockedPageRef,
   isBlockedTarget,
+  isPlaywrightBrowserConnectionCurrent,
   isRecoverablePlaywrightDisconnectError,
   pageTargetInfo,
   retirePlaywrightBrowserConnectionExact,
@@ -226,8 +227,7 @@ export async function forceDisconnectPlaywrightForTarget(opts: {
 }): Promise<void> {
   const normalized = normalizeCdpUrl(opts.cdpUrl);
   const browser = opts.page.context().browser();
-  const cur = cachedByCdpUrl.get(normalized);
-  if (!browser || cur?.browser !== browser) {
+  if (!browser || !isPlaywrightBrowserConnectionCurrent(normalized, browser)) {
     return;
   }
 
@@ -239,7 +239,7 @@ export async function forceDisconnectPlaywrightForTarget(opts: {
       cdpUrl: normalized,
       targetId,
       ssrfPolicy: opts.ssrfPolicy,
-      isCurrent: () => cachedByCdpUrl.get(normalized) === cur,
+      isCurrent: () => isPlaywrightBrowserConnectionCurrent(normalized, browser),
     }).catch(() => {});
   }
 
