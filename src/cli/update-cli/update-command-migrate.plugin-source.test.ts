@@ -61,10 +61,13 @@ it.each(["ready", "incompatible", "unprepared"] as const)(
             },
             providers: ["codex"],
             providerCatalogEntry: "./provider-discovery.mjs",
-            doctorContract: {
-              configRepair: true,
-              stateMigrations: [{ id: "fixture-state", doctorOnly: true }],
-            },
+            doctorContract:
+              condition === "unprepared"
+                ? { configRepair: true }
+                : {
+                    configRepair: true,
+                    stateMigrations: [{ id: "fixture-state", doctorOnly: true }],
+                  },
           }),
           "index.mjs": "throw new Error('native migration must not load plugin runtime');",
           "provider-discovery.mjs": "export default { id: 'codex', label: 'Fixture', auth: [] };",
