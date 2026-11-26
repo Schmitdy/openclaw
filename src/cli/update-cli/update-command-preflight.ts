@@ -12,11 +12,13 @@ import { resolveCommandProcessSignal, withCommandProcessScope } from "../../proc
 import { defaultRuntime } from "../../runtime.js";
 import { withArtifactPreservingStateReads } from "../../state/artifact-preserving-state-reads.js";
 import { parseUpdateTimeoutMs } from "./shared.js";
+import { preflightSupervisedDoctorPlugins } from "./update-command-doctor-plugin-preflight.js";
 import { withOwnedManagedUpdateEnv } from "./update-command-service-env.js";
 
 /**
  * Candidate-owned inspection for external supervisors; never admits a mutable update.
- * It proves the readable config and the candidate's recovery runtime. Doctor and
+ * It inspects required installed Doctor sources without replacing them and proves
+ * the readable config and the candidate's recovery runtime. Mutable Doctor and
  * Gateway startup are proven after activation, where the supervisor owns rollback.
  */
 export async function updatePreflightCommand(
@@ -80,6 +82,7 @@ export async function updatePreflightCommand(
                 reason: "config-source-invalid",
               };
             }
+            await preflightSupervisedDoctorPlugins(snapshot, env);
             const result = await checkUpdateCandidate({
               root,
               env,

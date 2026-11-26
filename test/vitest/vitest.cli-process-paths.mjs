@@ -51,6 +51,7 @@ export const cliProcessTestFiles = [
   "src/cli/update-cli/update-command-post-update-repair.test.ts",
   "src/cli/update-cli/update-command-service.integration.test.ts",
   "src/cli/update-cli/update-command-preflight.integration.test.ts",
+  "src/cli/update-cli/update-command-migrate.plugin-source.test.ts",
   "src/cli/update-cli/update-command-service-custody.test.ts",
   "src/cli/one-shot-exit.test.ts",
   "src/cli/runtime-cleanup-scope.windows.process.test.ts",

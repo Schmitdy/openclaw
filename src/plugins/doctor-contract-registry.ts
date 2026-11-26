@@ -27,8 +27,11 @@ import { resolvePluginDoctorContractArtifact } from "./doctor-contract-artifact.
 import { loadLegacyChannelStateMigrationDetector } from "./doctor-contract-legacy-setup.js";
 import {
   coercePluginDoctorContractModule,
+  declaresPluginDoctorContractSurface,
+  hasDeclaredStateMigration,
   type PluginDoctorCompatibilityNormalizer,
   type PluginDoctorContractModule,
+  type PluginDoctorContractSurface,
   type PluginDoctorStateMigrationEntry,
 } from "./doctor-contract-module.js";
 import {
@@ -40,7 +43,6 @@ import type { DoctorSessionRouteStateOwner } from "./doctor-session-route-state-
 import { isActivatedManifestOwner } from "./manifest-owner-policy.js";
 import { loadBundledPluginManifestRegistry } from "./manifest-registry-build.js";
 import type { PluginManifestRegistry } from "./manifest-registry.types.js";
-import type { PluginManifestDoctorContract } from "./manifest-types.js";
 import { normalizePluginPolicyId } from "./plugin-policy-id.js";
 import { loadPluginManifestRegistryForPluginRegistry } from "./plugin-registry.js";
 import {
@@ -70,23 +72,11 @@ export function isPluginDoctorMigrationDeferred(pluginId: string): boolean {
   );
 }
 
-export type PluginDoctorContractSurface = keyof PluginManifestDoctorContract;
-
-export function declaresPluginDoctorContractSurface(
-  declaration: PluginManifestDoctorContract | undefined,
-  surface: PluginDoctorContractSurface,
-): boolean {
-  const value = declaration?.[surface];
-  return (
-    value === true ||
-    (surface === "stateMigrations" && Array.isArray(value)) ||
-    (surface === "recoveryCli" && Array.isArray(value) && value.length > 0)
-  );
-}
-
-export type {
-  PluginDoctorStateMigration,
-  PluginDoctorStateMigrationDetection,
+export {
+  declaresPluginDoctorContractSurface,
+  type PluginDoctorContractSurface,
+  type PluginDoctorStateMigration,
+  type PluginDoctorStateMigrationDetection,
 } from "./doctor-contract-module.js";
 
 type PluginDoctorContractEntry = Omit<
@@ -114,6 +104,7 @@ export type PluginDoctorRegistryParams = {
   historicalWebhookListeners?: PluginDoctorCompatibilityOptions["historicalWebhookListeners"];
   /** Port preflight inspects retained data even when its selected owner is disabled. */
   includeDisabled?: boolean;
+  onContractError?: (pluginId: string, reason: string) => void;
 };
 
 /** Include manifest-owned legacy roots for config repair, never session ownership. */
@@ -148,13 +139,10 @@ export function collectDoctorConfigRepairPluginIds(
   return [...ids].toSorted();
 }
 
-function hasDeclaredStateMigration(declaration: PluginManifestDoctorContract["stateMigrations"]) {
-  return declaration === true || (Array.isArray(declaration) && declaration.length > 0);
-}
-
 function loadPluginDoctorContractEntry(
   record: PluginManifestRegistryRecord,
   surface: PluginDoctorContractSurface,
+  onContractError?: PluginDoctorRegistryParams["onContractError"],
 ): PluginDoctorContractEntry | { loadError: string } | null {
   const declaration = record.doctorContract;
   // Declarations gate loading only; modules remain authoritative, while absence preserves loading.
@@ -163,6 +151,9 @@ function loadPluginDoctorContractEntry(
   }
   const contractArtifact = resolvePluginDoctorContractArtifact(record);
   if (!contractArtifact) {
+    if (declaresPluginDoctorContractSurface(declaration, surface)) {
+      onContractError?.(record.id, "Doctor contract artifact was not found.");
+    }
     return surface === "stateMigrations" && hasDeclaredStateMigration(declaration?.stateMigrations)
       ? { loadError: "Doctor contract artifact was not found." }
       : null;
@@ -203,6 +194,7 @@ function loadPluginDoctorContractEntry(
     log.warn(
       `failed to load doctor contract for ${record.id} from ${contractArtifact.modulePath}: ${loadError}`,
     );
+    onContractError?.(record.id, loadError);
     return { loadError };
   }
 }
@@ -287,6 +279,7 @@ function resolvePluginDoctorContracts(
       ? records.filter((record) => !isPluginDoctorMigrationDeferred(record.id))
       : records,
     surface: params.surface,
+    onContractError: params.onContractError,
   });
   if (params.surface !== "configRepair") {
     return entries;
@@ -361,9 +354,10 @@ function resolvePluginDoctorContracts(
 function loadPluginDoctorContractEntries(params: {
   records: PluginManifestRegistryRecord[];
   surface: PluginDoctorContractSurface;
+  onContractError?: PluginDoctorRegistryParams["onContractError"];
 }): PluginDoctorContractEntry[] {
   return params.records.flatMap((record) => {
-    const entry = loadPluginDoctorContractEntry(record, params.surface);
+    const entry = loadPluginDoctorContractEntry(record, params.surface, params.onContractError);
     return entry && !("loadError" in entry) ? [entry] : [];
   });
 }
@@ -374,6 +368,7 @@ export function listPluginDoctorLegacyConfigRules(
     ? loadPluginDoctorContractEntries({
         records: resolvePluginDoctorStateMigrationRecords(params),
         surface: "configRepair",
+        onContractError: params.onContractError,
       })
     : resolvePluginDoctorContracts({ ...params, surface: "configRepair" });
   return entries.flatMap((entry) => entry.rules);

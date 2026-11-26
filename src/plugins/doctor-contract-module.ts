@@ -18,6 +18,26 @@ import { coerceDoctorSessionRouteStateOwners } from "./doctor-session-route-stat
 import type { PluginManifestDoctorContract } from "./manifest-types.js";
 import type { OpenClawPluginCliContext } from "./plugin-registration.types.js";
 
+export type PluginDoctorContractSurface = keyof PluginManifestDoctorContract;
+
+export function declaresPluginDoctorContractSurface(
+  declaration: PluginManifestDoctorContract | undefined,
+  surface: PluginDoctorContractSurface,
+): boolean {
+  const value = declaration?.[surface];
+  return (
+    value === true ||
+    (surface === "stateMigrations" && Array.isArray(value)) ||
+    (surface === "recoveryCli" && Array.isArray(value) && value.length > 0)
+  );
+}
+
+export function hasDeclaredStateMigration(
+  declaration: PluginManifestDoctorContract["stateMigrations"],
+) {
+  return declaration === true || (Array.isArray(declaration) && declaration.length > 0);
+}
+
 export type PluginDoctorStateMigrationDetection = {
   preview: string[];
 };

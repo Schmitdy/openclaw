@@ -243,6 +243,7 @@ it("migrates the Claws preference through candidate Doctor with a rollback origi
         .filter((line) => /^Doctor: Update (migration [\w ]+|schema admission)\n$/.test(line)),
     ).toEqual([
       "Doctor: Update migration config admission\n",
+      "Doctor: Update migration plugin preflight\n",
       "Doctor: Update migration schema preflight\n",
       "Doctor: Update migration database backup\n",
       "Doctor: Update schema admission\n",
